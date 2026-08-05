@@ -1,4 +1,6 @@
-# Chunky
+# The Zoo
+
+![The Zoo](assets/brand/the-zoo.png)
 
 A standalone coding-agent chat desktop app.
 Electrobun shell (bun-based), React 19 + Vite + Tailwind v4 webview, UI kit on

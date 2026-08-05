@@ -256,7 +256,13 @@ export function ZooWorkspace({
     : "The product factory"
 
   const main = !board.available ? (
-    <EmptyState
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto p-8">
+      <img
+        src="/the-zoo.png"
+        alt="The Zoo"
+        className="w-full max-w-md rounded-xl border border-border/60 shadow-sm"
+      />
+      <EmptyState
       icon={<Factory className="size-5" />}
       title={ZOO_UNAVAILABLE}
       body="Sources, evidence and the decision log live in the desktop app's local store. The web development build has no access to it — the workspace still runs, it just has nothing to show."
@@ -266,7 +272,8 @@ export function ZooWorkspace({
           Open chat instead
         </Button>
       }
-    />
+      />
+    </div>
   ) : view === "inbox" ? (
     <InboxView
       entries={entries}
