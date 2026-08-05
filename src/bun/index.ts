@@ -22,6 +22,7 @@ import {
 import { mergeDesktopState, readDesktopState, type DesktopState } from "./desktopState"
 import { createZooManager } from "./zoo"
 import { createZooService } from "./zooService"
+import { createWatchScheduler } from "./watchScheduler"
 import { hasVoiceApiKey, mintVoiceToken, setVoiceApiKey } from "./voice"
 import { inspectServers, retireServer, stopServer, type ServerInspection } from "./serverInspection"
 
@@ -213,6 +214,24 @@ const zoo = createZooManager()
 // The token-guarded loopback service remains dormant until the renderer needs
 // to announce it to the local Chunky server.
 const zooService = createZooService({ manager: zoo })
+
+// Competitor watch: the daily GitHub check runs HERE, in Bun, never in the
+// renderer. It only fetches — turning the artifacts it stores into insights is
+// still the renderer's ordinary extraction pass, so there is one pipeline.
+const watchScheduler = createWatchScheduler({
+  state: async () => {
+    const state = await zoo.watchState({})
+    return state.ok ? { hour: state.hour, lastCheckAt: state.lastCheckAt } : { hour: 8, lastCheckAt: null }
+  },
+  run: async () => {
+    const state = await zoo.watchState({})
+    // Nothing to check yet: record nothing, so adding the first watch is what
+    // starts the cycle rather than an empty daily pass.
+    if (!state.ok || state.watchCount === 0) return { ok: true as const, results: [], checkedAt: Date.now() }
+    return zoo.checkRepoWatches({})
+  },
+  onError: (error) => console.warn("[zoo] competitor watch check failed:", error),
+})
 
 rpc = createRPC({
   maxRequestTime: 180_000,
@@ -430,6 +449,31 @@ rpc = createRPC({
     zooUpdateArea: async (params: unknown) => zoo.updateArea(params),
     zooDeleteArea: async (params: unknown) => zoo.deleteArea(params),
     zooAssignArea: async (params: unknown) => zoo.assignArea(params),
+    zooListRepoWatches: async (params: unknown) => zoo.listRepoWatches(params),
+    zooAddRepoWatch: async (params: unknown) => {
+      const result = await zoo.addRepoWatch(params)
+      // The first watch starts the daily cycle; a later one just rides it.
+      if (result.ok) void watchScheduler.start().catch(() => {})
+      return result
+    },
+    zooRemoveRepoWatch: async (params: unknown) => zoo.removeRepoWatch(params),
+    zooSetWatchSchedule: async (params: unknown) => {
+      const result = await zoo.setWatchSchedule(params)
+      if (result.ok) await watchScheduler.reschedule()
+      return result
+    },
+    /** Manual "Check now". A whole-watchlist check runs THROUGH the scheduler,
+     *  so it and the daily slot share one in-flight guard in both directions. */
+    zooCheckRepoWatches: async (params: unknown) => {
+      const body = params && typeof params === "object" && !Array.isArray(params) ? (params as Record<string, unknown>) : {}
+      if (typeof body.watchId === "string") return zoo.checkRepoWatches(body)
+      const outcome = await watchScheduler.checkNow()
+      return outcome.ran
+        ? outcome.result
+        : { ok: false as const, error: "A competitor-watch check is already running." }
+    },
+    zooMarkWatchExtracted: async (params: unknown) => zoo.markWatchExtracted(params),
+    zooWatchState: async (params: unknown) => zoo.watchState(params),
     zooConnectLinear: async (params: unknown) => zoo.connectLinear(params),
     zooConnectTranscripts: async (params: unknown) => zoo.connectTranscripts(params),
     zooStartBackfill: async (params: unknown) => zoo.startBackfill(params),
@@ -469,6 +513,13 @@ rpc = createRPC({
     scmPublish: async (params: unknown) => git.scmPublish(params ?? {}),
   },
 })
+
+// Arm the competitor watch only when a board already exists — starting it on a
+// fresh install would create zoo.db for nothing. Adding the first watch starts
+// it instead (see zooAddRepoWatch). Catch-up + arming happen inside start().
+if (zoo.hasStore()) {
+  void watchScheduler.start().catch((error) => console.warn("[zoo] competitor watch scheduler:", error))
+}
 
 const url = await getMainViewUrl()
 

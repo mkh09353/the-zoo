@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
 import { createZooManager, type ZooManager } from "./zoo"
+import { createWatchScheduler } from "./watchScheduler"
 
 const cleanup: { path: string; zoo: ZooManager }[] = []
 afterEach(() => {
@@ -282,4 +283,237 @@ test("opens a board written before areas existed and keeps every row", async () 
   expect(await zoo.assignArea({ kind: "item", id: "t-1", areaId: area.area.id })).toEqual({ ok: true })
   expect((await zoo.listItems({}) as { items: { areaId?: string }[] }).items[0]?.areaId).toBe(area.area.id)
   expect((await zoo.listIdeas({}) as { ideas: { areaId?: string }[] }).ideas[0]?.areaId).toBe(area.area.id)
+})
+
+// ---- Competitor watch: a watch is a source, its delta is an artifact --------
+
+const DAY_MS = 86_400_000
+
+/** A GitHub stub for the six endpoints one check touches. */
+function githubFetch(state: { releases?: unknown[]; tags?: unknown[]; pulls?: unknown[]; rateLimited?: boolean }) {
+  return (async (url: RequestInfo | URL) => {
+    const href = String(url)
+    if (state.rateLimited) return new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } })
+    if (href.endsWith("/repos/sst/opencode")) return new Response(JSON.stringify({ default_branch: "main", description: "Terminal agent" }))
+    if (href.includes("/releases")) return new Response(JSON.stringify(state.releases ?? []))
+    if (href.includes("/tags")) return new Response(JSON.stringify(state.tags ?? []))
+    if (href.includes("/pulls")) return new Response(JSON.stringify(state.pulls ?? []))
+    return new Response("[]")
+  }) as typeof fetch
+}
+
+function watchSetup(state: Parameters<typeof githubFetch>[0], now: () => number) {
+  const path = mkdtempSync(join(tmpdir(), "chunky-zoo-watch-"))
+  const zoo = createZooManager({ dbPath: join(path, "zoo.db"), fetch: githubFetch(state), githubToken: null, now })
+  cleanup.push({ path, zoo })
+  return zoo
+}
+
+test("watches a repo, turns its delta into an artifact, and never re-reports it", async () => {
+  const state: Parameters<typeof githubFetch>[0] = { releases: [], tags: [{ name: "v1.0.0" }], pulls: [] }
+  let clock = Date.UTC(2026, 0, 10, 8, 0)
+  const zoo = watchSetup(state, () => clock)
+
+  expect(await zoo.addRepoWatch({ repo: "not a repo" })).toMatchObject({ ok: false, error: "Enter a repository as owner/name" })
+  const added = await zoo.addRepoWatch({ repo: "https://github.com/sst/opencode" })
+  if (!added.ok) throw new Error(added.error)
+  expect(added.watch).toMatchObject({ owner: "sst", name: "opencode", label: "sst/opencode" })
+  expect(await zoo.addRepoWatch({ repo: "sst/opencode" })).toMatchObject({ ok: false, error: "That repository is already watched" })
+
+  // The watch shows up as an ordinary source, so the rest of the pipeline needs
+  // no special case for it.
+  const status = await zoo.status({}); if (!status.ok) throw new Error(status.error)
+  expect(status.sources[0]).toMatchObject({ kind: "repo-watch", label: "sst/opencode" })
+
+  // First check: a tag baseline is captured, but tags are not reported as news.
+  const first = await zoo.checkRepoWatches({}); if (!first.ok) throw new Error(first.error)
+  expect(first.results).toEqual([{ watchId: added.watch.id, label: "sst/opencode", status: "ok", added: 0, note: "No new activity" }])
+  expect((await zoo.listArtifacts({}) as { total: number }).total).toBe(0)
+
+  // Second check, after they ship: one artifact, formatted for extraction.
+  clock += DAY_MS
+  state.releases = [{ tag_name: "v1.1.0", name: "1.1.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "https://gh/r/1", body: "Subagents" }]
+  state.tags = [{ name: "v1.1.0" }, { name: "v1.0.0" }]
+  const second = await zoo.checkRepoWatches({}); if (!second.ok) throw new Error(second.error)
+  expect(second.results[0]).toMatchObject({ status: "ok", added: 1, note: "Recorded 1 release, 1 tag" })
+  const artifacts = await zoo.listArtifacts({}); if (!artifacts.ok) throw new Error(artifacts.error)
+  expect(artifacts.total).toBe(1)
+  expect(artifacts.artifacts[0]).toMatchObject({ kind: "repo-watch", title: "sst/opencode — 1 release, 1 tag" })
+  const artifact = await zoo.getArtifact({ id: artifacts.artifacts[0]!.id }); if (!artifact.ok) throw new Error(artifact.error)
+  expect(artifact.artifact.content).toContain("Competitor activity: sst/opencode")
+  expect(artifact.artifact.content).toContain("Subagents")
+
+  // Third check with nothing new: no artifact, and the release is not repeated.
+  clock += DAY_MS
+  const third = await zoo.checkRepoWatches({}); if (!third.ok) throw new Error(third.error)
+  expect(third.results[0]).toMatchObject({ status: "ok", added: 0, note: "No new activity" })
+  expect((await zoo.listArtifacts({}) as { total: number }).total).toBe(1)
+
+  const watches = await zoo.listRepoWatches({}); if (!watches.ok) throw new Error(watches.error)
+  expect(watches.watches[0]).toMatchObject({ lastStatus: "ok", lastNote: "No new activity" })
+  expect(watches.watches[0]?.lastCheckAt).toBe(clock)
+  expect(watches.hour).toBe(8)
+  expect(watches.lastRunAt).toBe(clock)
+})
+
+test("a rate-limited check records a skip and keeps the delta window", async () => {
+  const state: Parameters<typeof githubFetch>[0] = { releases: [], tags: [], pulls: [] }
+  let clock = Date.UTC(2026, 0, 10, 8, 0)
+  const zoo = watchSetup(state, () => clock)
+  const added = await zoo.addRepoWatch({ repo: "sst/opencode" }); if (!added.ok) throw new Error(added.error)
+  await zoo.checkRepoWatches({})
+  const cursor = (await zoo.listRepoWatches({}) as { watches: { lastCheckAt?: number }[] }).watches[0]?.lastCheckAt
+
+  clock += DAY_MS
+  state.rateLimited = true
+  const limited = await zoo.checkRepoWatches({}); if (!limited.ok) throw new Error(limited.error)
+  expect(limited.results[0]).toMatchObject({ status: "skipped", added: 0 })
+  expect(limited.results[0]?.note).toContain("rate limit")
+  const after = await zoo.listRepoWatches({}); if (!after.ok) throw new Error(after.error)
+  // The cursor did NOT move: the missed window is picked up by the next check.
+  expect(after.watches[0]?.lastCheckAt).toBe(cursor)
+  expect(after.watches[0]?.lastStatus).toBe("skipped")
+
+  // And the very next check still sees everything since the last good cursor.
+  clock += DAY_MS
+  state.rateLimited = false
+  state.releases = [{ tag_name: "v2", name: "2.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "", body: "" }]
+  const recovered = await zoo.checkRepoWatches({}); if (!recovered.ok) throw new Error(recovered.error)
+  expect(recovered.results[0]).toMatchObject({ status: "ok", added: 1 })
+})
+
+test("scopes an extraction pass to one watch and to what arrived since its last one", async () => {
+  const state: Parameters<typeof githubFetch>[0] = { releases: [], tags: [], pulls: [] }
+  let clock = Date.UTC(2026, 0, 10, 8, 0)
+  const zoo = watchSetup(state, () => clock)
+  const area = await zoo.createArea({ name: "Agents" }); if (!area.ok) throw new Error(area.error)
+  const watch = await zoo.addRepoWatch({ repo: "sst/opencode", areaId: area.area.id }); if (!watch.ok) throw new Error(watch.error)
+  expect(watch.watch.areaId).toBe(area.area.id)
+
+  state.releases = [{ tag_name: "v1", name: "1.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "", body: "First" }]
+  await zoo.checkRepoWatches({})
+  const firstRun = clock
+
+  clock += DAY_MS
+  state.releases = [{ tag_name: "v2", name: "2.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "", body: "Second" }]
+  await zoo.checkRepoWatches({})
+
+  const all = await zoo.exportForExtraction({ sourceId: watch.watch.sourceId }); if (!all.ok) throw new Error(all.error)
+  expect(all.bundle).toContain("First")
+  expect(all.bundle).toContain("Second")
+
+  const fresh = await zoo.exportForExtraction({ sourceId: watch.watch.sourceId, sinceFetchedAt: firstRun })
+  if (!fresh.ok) throw new Error(fresh.error)
+  expect(fresh.bundle).toContain("Second")
+  expect(fresh.bundle).not.toContain("First")
+
+  expect(await zoo.exportForExtraction({ sourceId: "nope" })).toMatchObject({ ok: false, error: "Unknown source" })
+
+  // Insights recorded from that bundle carry the watch label, so an Inbox card
+  // can say which competitor it is about.
+  const artifacts = await zoo.listArtifacts({ sourceId: watch.watch.sourceId }); if (!artifacts.ok) throw new Error(artifacts.error)
+  await zoo.recordInsights({
+    passId: fresh.passId,
+    areaId: area.area.id,
+    insights: [{ title: "They shipped subagents", summary: "Applies to us", evidence: [{ artifactId: artifacts.artifacts[0]!.id, quote: "Second" }] }],
+  })
+  const insights = await zoo.listInsights({}); if (!insights.ok) throw new Error(insights.error)
+  expect(insights.insights[0]?.sourceLabels).toEqual(["sst/opencode"])
+  expect(insights.insights[0]?.areaId).toBe(area.area.id)
+
+  expect(await zoo.markWatchExtracted({ watchId: watch.watch.id })).toEqual({ ok: true })
+  const marked = await zoo.listRepoWatches({}); if (!marked.ok) throw new Error(marked.error)
+  expect(marked.watches[0]?.lastExtractAt).toBe(clock)
+})
+
+test("stores the schedule hour, reports scheduler state, and keeps evidence when a watch is dropped", async () => {
+  let clock = Date.UTC(2026, 0, 10, 8, 0)
+  const zoo = watchSetup({ releases: [{ tag_name: "v1", name: "1.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "", body: "note" }] }, () => clock)
+  const idle = await zoo.watchState({}); if (!idle.ok) throw new Error(idle.error)
+  expect(idle).toMatchObject({ hour: 8, lastCheckAt: null, watchCount: 0 })
+
+  expect(await zoo.setWatchSchedule({ hour: 25 })).toMatchObject({ ok: false })
+  expect(await zoo.setWatchSchedule({ hour: 6 })).toEqual({ ok: true, hour: 6 })
+
+  const watch = await zoo.addRepoWatch({ repo: "sst/opencode" }); if (!watch.ok) throw new Error(watch.error)
+  await zoo.checkRepoWatches({ watchId: watch.watch.id })
+  const state = await zoo.watchState({}); if (!state.ok) throw new Error(state.error)
+  expect(state).toMatchObject({ hour: 6, lastCheckAt: clock, watchCount: 1 })
+  expect(await zoo.checkRepoWatches({ watchId: "nope" })).toMatchObject({ ok: false, error: "Unknown watch" })
+
+  // Dropping a watch stops the checks but keeps the source and its artifacts —
+  // insights already drawn from them still have their evidence.
+  expect(await zoo.removeRepoWatch({ watchId: watch.watch.id })).toEqual({ ok: true })
+  expect(await zoo.listRepoWatches({})).toMatchObject({ ok: true, watches: [] })
+  const after = await zoo.status({}); if (!after.ok) throw new Error(after.error)
+  expect(after.sources).toHaveLength(1)
+  expect(after.artifactCount).toBe(1)
+})
+
+test("the scheduler catches up on launch, stores the delta, and does not re-run after a relaunch", async () => {
+  // Store + scheduler together, on one database file, with a fake clock: the
+  // closest thing to "the app opened, checked, and was reopened later".
+  const path = mkdtempSync(join(tmpdir(), "chunky-zoo-sched-"))
+  const dbPath = join(path, "zoo.db")
+  let clock = Date.UTC(2026, 0, 10, 9, 0)
+  const state = { releases: [{ tag_name: "v1", name: "1.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "https://gh/r/1", body: "Subagents" }], tags: [{ name: "v1" }], pulls: [] }
+
+  const boot = () => {
+    const manager = createZooManager({ dbPath, fetch: githubFetch(state), githubToken: null, now: () => clock })
+    cleanup.push({ path, zoo: manager })
+    const timers: { at: number; fn: () => void }[] = []
+    const runs: number[] = []
+    const scheduler = createWatchScheduler({
+      state: async () => {
+        const watchState = await manager.watchState({})
+        return watchState.ok ? { hour: watchState.hour, lastCheckAt: watchState.lastCheckAt } : { hour: 8, lastCheckAt: null }
+      },
+      run: async () => {
+        runs.push(clock)
+        const watchState = await manager.watchState({})
+        if (watchState.ok && watchState.watchCount > 0) await manager.checkRepoWatches({})
+      },
+      now: () => clock,
+      setTimer: (ms, fn) => {
+        const timer = { at: clock + ms, fn }
+        timers.push(timer)
+        return timer
+      },
+      clearTimer: () => {},
+    })
+    return { manager, scheduler, runs, timers }
+  }
+
+  const first = boot()
+  const watch = await first.manager.addRepoWatch({ repo: "sst/opencode" })
+  if (!watch.ok) throw new Error(watch.error)
+  await first.scheduler.start()
+  // Never checked before -> catch-up ran, and the delta is on the board.
+  expect(first.runs).toEqual([clock])
+  expect((await first.manager.listArtifacts({}) as { total: number }).total).toBe(1)
+  expect(first.scheduler.nextRunAt()).toBe(new Date(2026, 0, 11, 8, 0, 0, 0).getTime())
+  first.scheduler.stop()
+  first.manager.close()
+
+  // Relaunch two hours later: the persisted run time says today is done.
+  clock += 2 * 3600_000
+  const second = boot()
+  await second.scheduler.start()
+  expect(second.runs).toEqual([])
+  expect((await second.manager.listArtifacts({}) as { total: number }).total).toBe(1)
+  second.scheduler.stop()
+  second.manager.close()
+
+  // Relaunch after a day away: stale, so it catches up — and picks up what
+  // shipped while the app was closed.
+  clock += 30 * 3600_000
+  state.releases = [{ tag_name: "v2", name: "2.0", published_at: new Date(clock - 3600_000).toISOString(), html_url: "https://gh/r/2", body: "Plugins" }]
+  state.tags = [{ name: "v2" }, { name: "v1" }]
+  const third = boot()
+  await third.scheduler.start()
+  expect(third.runs).toHaveLength(1)
+  const artifacts = await third.manager.listArtifacts({}); if (!artifacts.ok) throw new Error(artifacts.error)
+  expect(artifacts.total).toBe(2)
+  expect(artifacts.artifacts[0]?.title).toBe("sst/opencode — 1 release, 1 tag")
+  third.scheduler.stop()
 })

@@ -8,6 +8,7 @@ import { TooltipProvider } from "../ui/tooltip"
 import { ZooWorkspace } from "./ZooWorkspace"
 import { InboxView } from "./InboxView"
 import { BoardView } from "./BoardView"
+import { IDLE_RUNS, SourcesView } from "./SourcesView"
 import { DetailPane } from "./DetailPane"
 import { buildInbox } from "~/lib/zooInbox"
 import type { ZooArea, ZooIdea, ZooInsight, ZooItem } from "~/lib/zoo"
@@ -250,5 +251,124 @@ describe("DetailPane area assignment", () => {
     )
     expect(html).toContain("Unassigned")
     expect(html).toContain("visible in every area")
+  })
+})
+
+// ---- Competitor watch in the Sources view ---------------------------------
+
+const watches: import("~/lib/zoo").ZooRepoWatch[] = [
+  {
+    id: "w-1",
+    sourceId: "s-watch-1",
+    owner: "sst",
+    name: "opencode",
+    label: "sst/opencode",
+    areaId: "a-pay",
+    lastCheckAt: Date.now() - 3_600_000,
+    lastStatus: "ok",
+    lastNote: "Recorded 1 release, 2 merged PRs",
+    lastArtifactAt: Date.now() - 3_600_000,
+    createdAt: 1000,
+  },
+  {
+    id: "w-2",
+    sourceId: "s-watch-2",
+    owner: "openai",
+    name: "codex",
+    label: "openai/codex",
+    lastStatus: "skipped",
+    lastNote: "GitHub rate limit reached",
+    createdAt: 2000,
+  },
+]
+
+function sources(watchRows: typeof watches) {
+  return renderToStaticMarkup(
+    <TooltipProvider>
+      <SourcesView
+        status={{ sources: [], artifactCount: 4, insightCount: 2, ideaCount: 0, itemCount: 0, passes: [] }}
+        sources={[]}
+        areaId={null}
+        areaName={null}
+        runs={IDLE_RUNS}
+        elapsed={0}
+        onRun={() => {}}
+        onRefresh={async () => {}}
+        baseUrl="http://localhost:4620"
+        repoId="r-1"
+        insightCount={2}
+        watches={watchRows}
+        areas={areas}
+        watchHour={8}
+        watchLastRunAt={Date.now() - 7_200_000}
+        onAssignArea={() => {}}
+      />
+    </TooltipProvider>,
+  )
+}
+
+describe("competitor watch section", () => {
+  it("offers a watchlist even before anything is watched", () => {
+    const html = sources([])
+    expect(html).toContain("Competitor watch")
+    expect(html).toContain("owner/name")
+    expect(html).toContain("Daily at")
+  })
+
+  it("shows each watch with what its last check found", () => {
+    const html = sources(watches)
+    expect(html).toContain("sst/opencode")
+    expect(html).toContain("Recorded 1 release, 2 merged PRs")
+    expect(html).toContain("Check now")
+    // A rate-limited check reads as skipped, not as success or as an outage.
+    expect(html).toContain("Skipped — GitHub rate limit reached")
+    // A watch belongs to an area like any other source.
+    expect(html).toContain("Area: Payments")
+  })
+
+  it("offers to synthesize deltas a background check already stored", () => {
+    expect(sources(watches)).toContain("Synthesize new activity")
+    // Nothing pending -> no button.
+    expect(sources([{ ...watches[0]!, lastExtractAt: Date.now() }])).not.toContain("Synthesize new activity")
+  })
+})
+
+describe("watch signals in the Inbox", () => {
+  it("badges an uncited-signal card with the repository it came from", () => {
+    const signal = buildInbox({
+      ideas: [],
+      items: [],
+      insights: [
+        {
+          id: "i-9",
+          passId: "p-watch",
+          title: "sst/opencode shipped subagents",
+          summary: "Parallel sub-agents with their own context. Applies to us: we have the same seat model.",
+          evidence: [{ artifactId: "a-9", quote: "Releases: 0.9.0 — subagents" }],
+          sourceLabels: ["sst/opencode"],
+          createdAt: 5000,
+        },
+      ],
+    })
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <InboxView
+          entries={signal}
+          inFlight={[]}
+          selectedId={null}
+          onSelect={() => {}}
+          context={{ repoId: "r-1", baseUrl: "http://localhost:4620" }}
+          areas={areas}
+          showAreas={false}
+          onRefresh={async () => {}}
+          onSetAside={() => {}}
+          onSynthesize={() => {}}
+          loading={false}
+        />
+      </TooltipProvider>,
+    )
+    expect(html).toContain("sst/opencode")
+    expect(html).toContain("sst/opencode shipped subagents")
+    expect(html).toContain("Synthesize ideas")
   })
 })

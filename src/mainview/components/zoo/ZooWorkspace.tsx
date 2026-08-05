@@ -25,6 +25,7 @@ import {
   type ZooItem,
 } from "~/lib/zoo"
 import {
+  inArea,
   loadSelectedArea,
   resolveSelection,
   saveSelectedArea,
@@ -108,6 +109,12 @@ export function ZooWorkspace({
     [ideas, items, insights, setAside, selectedArea],
   )
   const inFlight = useMemo(() => inFlightItems(items, selectedArea), [items, selectedArea])
+  /** Watches follow the same scoping rule as everything else: unassigned ones
+   *  stay visible inside every area. */
+  const watchesInView = useMemo(
+    () => board.watches.filter((watch) => inArea(watch, selectedArea)),
+    [board.watches, selectedArea],
+  )
 
   /** Every selectable thing, queued or not, in the shape the detail pane wants. */
   const catalog = useMemo(() => {
@@ -302,6 +309,11 @@ export function ZooWorkspace({
       baseUrl={baseUrl}
       repoId={repoId}
       insightCount={scoped.insights.length}
+      watches={watchesInView}
+      areas={areas}
+      watchHour={board.watchHour}
+      watchLastRunAt={board.watchLastRunAt}
+      onAssignArea={(sourceId, next) => assignArea("source", sourceId, next)}
     />
   )
 
