@@ -29,6 +29,7 @@ import { PrPanel } from "./components/PrPanel"
 import { SidekickPicker } from "./components/SidekickPicker"
 import { BrowserPane } from "./components/BrowserPane"
 import { FactoryPane } from "./components/FactoryPane"
+import { ZooWorkspace } from "./components/zoo/ZooWorkspace"
 import { ExternalLinkMenu } from "./components/ExternalLinkMenu"
 import { ConfirmHost } from "./components/ConfirmDialog"
 import { confirm } from "./lib/confirm"
@@ -396,6 +397,9 @@ export function App() {
   const [browserOpen, setBrowserOpen] = useState(false)
   // The factory shares the content-panel side region with the browser pane.
   const [factoryOpen, setFactoryOpen] = useState(false)
+  // The Zoo is the app's primary surface; chat is the secondary one, reachable
+  // from the workspace header, the palette, or by opening an item's session.
+  const [surface, setSurface] = useState<"zoo" | "chat">("zoo")
   // PR reviews: the board is polled here (the sidebar widget needs it whether or
   // not the panel is open); the slide-over owns actions and setup.
   const [prOpen, setPrOpen] = useState(false)
@@ -2567,9 +2571,10 @@ export function App() {
     { id: "theme", label: "Toggle theme", group: "Appearance" },
     { id: "browser", label: browserOpen ? "Close browser" : "Open browser", group: "Workspace" },
     { id: "factory", label: factoryOpen ? "Close Factory" : "Open Factory", group: "Workspace" },
+    { id: "zoo", label: surface === "zoo" ? "Open chat" : "Open The Zoo", group: "Workspace" },
     { id: "settings", label: "Open Settings", hint: "⌘,", group: "Integration" },
     { id: "onboarding", label: "Run Onboarding", group: "Integration" },
-  ], [repos, sessions, uiModels, browserOpen, factoryOpen])
+  ], [repos, sessions, uiModels, browserOpen, factoryOpen, surface])
 
   /** Stable app-action dispatch shared by the palette and the voice agent. */
   const dispatchAppAction = useCallback(
@@ -2609,6 +2614,7 @@ export function App() {
       else if (a.id === "theme") toggle()
       else if (a.id === "browser") setBrowserOpen((open) => { if (!open) setFactoryOpen(false); return !open })
       else if (a.id === "factory") setFactoryOpen((open) => { if (!open) setBrowserOpen(false); return !open })
+      else if (a.id === "zoo") setSurface((current) => (current === "zoo" ? "chat" : "zoo"))
       else if (a.id === "settings") setSettingsOpen(true)
       else if (a.id === "onboarding") { if (live) setOnboardingOpen(true) }
       else if (a.id.startsWith("repo:")) dispatchAppAction({ type: "select-repo", repoId: a.id.slice(5) })
@@ -2758,6 +2764,12 @@ export function App() {
   return (
     <TooltipProvider delay={300}>
       <div className="shell-chrome chunky-aurora flex h-screen w-screen overflow-hidden">
+        {/* Two surfaces share this shell. The Zoo (the product-factory
+            workspace) is the default; the chat view is one click away in its
+            header, in the palette, and wherever an item's session is opened.
+            Only one of them is mounted at a time. */}
+        {surface === "chat" ? (
+          <>
         {/* Far-left edge: the cross-repository overview. Fixed-position, so it
             sits outside the flex row and never shifts the layout. */}
         <ActivityOverlay
@@ -2813,7 +2825,7 @@ export function App() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ChatTopBar
             repoStatus={live ? <GitToolbar cwd={gitCwd} /> : null}
-            headerRight={<>{incognitoSession && <span title="This session is off the record — nothing is written to disk." className="flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-1 font-medium text-[11px] text-destructive"><EyeOff className="size-3" />Incognito</span>}{goal && <button type="button" onClick={() => void openDialog("goal")} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">Goal · {goal.status}{goal.turns != null ? ` · ${goal.turns} turns` : ""}</button>}<VoiceButton state={voice.state} active={voice.active} error={voice.error} disabled={!voiceEnabled} onToggle={voice.toggle} apiKeyPromptOpen={voice.apiKeyPromptOpen} onApiKeyPromptOpenChange={voice.setApiKeyPromptOpen} onSubmitApiKey={voice.submitApiKey} /></>}
+            headerRight={<><Button size="sm" variant="ghost" onClick={() => setSurface("zoo")} title="Back to The Zoo">The Zoo</Button>{incognitoSession && <span title="This session is off the record — nothing is written to disk." className="flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-1 font-medium text-[11px] text-destructive"><EyeOff className="size-3" />Incognito</span>}{goal && <button type="button" onClick={() => void openDialog("goal")} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">Goal · {goal.status}{goal.turns != null ? ` · ${goal.turns} turns` : ""}</button>}<VoiceButton state={voice.state} active={voice.active} error={voice.error} disabled={!voiceEnabled} onToggle={voice.toggle} apiKeyPromptOpen={voice.apiKeyPromptOpen} onApiKeyPromptOpenChange={voice.setApiKeyPromptOpen} onSubmitApiKey={voice.submitApiKey} /></>}
             theme={resolved}
             onToggleTheme={toggle}
             onRename={() => void openDialog("rename")} onFork={() => void openDialog("fork")} onRewind={() => void openDialog("rewind")} onGoal={() => void openDialog("goal")} onShip={() => void openDialog("ship")} onStats={() => void openDialog("stats")}
@@ -2924,6 +2936,25 @@ export function App() {
             <ExternalLinkMenu />
           </section>
         </div>
+          </>
+        ) : (
+          <>
+            <ZooWorkspace
+              baseUrl={live && connectionState === "connected" ? config?.baseUrl ?? null : null}
+              repoId={activeRepoId}
+              onOpenChat={() => setSurface("chat")}
+              onOpenSession={
+                live
+                  ? (id) => {
+                      setSurface("chat")
+                      handleSelectThread(id)
+                    }
+                  : undefined
+              }
+            />
+            <ExternalLinkMenu />
+          </>
+        )}
 
         {voice.visible && (
           <VoiceHud

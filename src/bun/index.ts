@@ -143,7 +143,7 @@ void ensureFinders(extraRoots).catch((err) => {
 // are no-ops in the WebView.
 ApplicationMenu.setApplicationMenu([
   {
-    label: "Chunky",
+    label: "The Zoo",
     submenu: [
       { role: "about" },
       { label: "Check for Updates…", action: "check-for-updates" },
@@ -468,7 +468,7 @@ rpc = createRPC({
 const url = await getMainViewUrl()
 
 const win = new BrowserWindow({
-  title: "Chunky",
+  title: "The Zoo",
   url,
   rpc,
   renderer: "native",
