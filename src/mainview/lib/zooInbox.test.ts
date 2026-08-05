@@ -174,3 +174,103 @@ describe("board helpers", () => {
     ])
   })
 })
+
+// ---- Areas: scoping the queue without partitioning the board ---------------
+
+describe("area scoping", () => {
+  const board = {
+    ideas: [
+      idea({ id: "d-pay", areaId: "a-pay", createdAt: 100 }),
+      idea({ id: "d-growth", areaId: "a-growth", createdAt: 200 }),
+      idea({ id: "d-legacy", createdAt: 300 }),
+    ],
+    items: [
+      item({ id: "t-pay", stage: "decision", areaId: "a-pay" }),
+      item({ id: "t-growth", stage: "review", areaId: "a-growth" }),
+      item({ id: "t-legacy", stage: "decision" }),
+    ],
+    insights: [
+      insight({ id: "i-pay", passId: "p-pay", areaId: "a-pay" }),
+      insight({ id: "i-growth", passId: "p-growth", areaId: "a-growth" }),
+      insight({ id: "i-legacy", passId: "p-legacy" }),
+    ],
+  }
+
+  it("shows everything under All areas", () => {
+    expect(buildInbox(board).map((entry) => entry.id).sort()).toEqual([
+      "idea:d-growth",
+      "idea:d-legacy",
+      "idea:d-pay",
+      "insights:p-growth",
+      "insights:p-legacy",
+      "insights:p-pay",
+      "item:t-growth",
+      "item:t-legacy",
+      "item:t-pay",
+    ])
+  })
+
+  it("scopes to one area and keeps unassigned rows visible in it", () => {
+    const ids = buildInbox({ ...board, areaId: "a-pay" }).map((entry) => entry.id)
+    expect(ids).toContain("item:t-pay")
+    expect(ids).toContain("idea:d-pay")
+    expect(ids).toContain("insights:p-pay")
+    // Rows stored before areas existed belong to no product, so every area sees them.
+    expect(ids).toContain("item:t-legacy")
+    expect(ids).toContain("idea:d-legacy")
+    expect(ids).toContain("insights:p-legacy")
+    // Another area's work is the only thing hidden.
+    expect(ids).not.toContain("item:t-growth")
+    expect(ids).not.toContain("idea:d-growth")
+    expect(ids).not.toContain("insights:p-growth")
+  })
+
+  it("carries the area onto each entry so cards can be badged", () => {
+    const entries = buildInbox(board)
+    const byId = new Map(entries.map((entry) => [entry.id, entry]))
+    expect(byId.get("item:t-pay")?.areaId).toBe("a-pay")
+    expect(byId.get("idea:d-growth")?.areaId).toBe("a-growth")
+    expect(byId.get("insights:p-pay")?.areaId).toBe("a-pay")
+    // Unassigned entries carry no area at all rather than a fake one.
+    expect(byId.get("item:t-legacy")?.areaId).toBeUndefined()
+    expect(byId.get("insights:p-legacy")?.areaId).toBeUndefined()
+  })
+
+  it("still resolves evidence cited across areas", () => {
+    // A payments idea citing a growth insight: the link renders, and the
+    // insight does NOT come back as an uncited signal in either area.
+    const crossing = {
+      ideas: [idea({ id: "d-pay", areaId: "a-pay", insightIds: ["i-growth"] })],
+      items: [],
+      insights: [insight({ id: "i-growth", passId: "p-growth", areaId: "a-growth" })],
+    }
+    const scoped = buildInbox({ ...crossing, areaId: "a-pay" })
+    expect(scoped.map((entry) => entry.id)).toEqual(["idea:d-pay"])
+    expect(scoped[0]?.insights.map((row) => row.id)).toEqual(["i-growth"])
+    expect(buildInbox({ ...crossing, areaId: "a-growth" }).map((entry) => entry.id)).toEqual([])
+  })
+
+  it("treats a board with no areas at all exactly as before", () => {
+    const legacy = {
+      ideas: [idea({ id: "d-1" })],
+      items: [item({ id: "t-1", stage: "decision" })],
+      insights: [insight({ id: "i-1", passId: "p-1" })],
+    }
+    const unscoped = buildInbox(legacy)
+    expect(unscoped.map((entry) => entry.id)).toEqual(["item:t-1", "idea:d-1", "insights:p-1"])
+    // Selecting any area still shows all of it — nothing is lost or hidden.
+    expect(buildInbox({ ...legacy, areaId: "a-anything" }).map((entry) => entry.id)).toEqual(
+      unscoped.map((entry) => entry.id),
+    )
+  })
+
+  it("scopes the in-flight strip the same way", () => {
+    const items = [
+      item({ id: "t-pay", stage: "building", areaId: "a-pay", updatedAt: 10 }),
+      item({ id: "t-growth", stage: "research", areaId: "a-growth", updatedAt: 20 }),
+      item({ id: "t-legacy", stage: "building", updatedAt: 30 }),
+    ]
+    expect(inFlightItems(items).map((row) => row.id)).toEqual(["t-legacy", "t-growth", "t-pay"])
+    expect(inFlightItems(items, "a-pay").map((row) => row.id)).toEqual(["t-legacy", "t-pay"])
+  })
+})

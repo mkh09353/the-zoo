@@ -7,9 +7,15 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { TooltipProvider } from "../ui/tooltip"
 import { ZooWorkspace } from "./ZooWorkspace"
 import { InboxView } from "./InboxView"
+import { BoardView } from "./BoardView"
 import { DetailPane } from "./DetailPane"
 import { buildInbox } from "~/lib/zooInbox"
-import type { ZooIdea, ZooInsight, ZooItem } from "~/lib/zoo"
+import type { ZooArea, ZooIdea, ZooInsight, ZooItem } from "~/lib/zoo"
+
+const areas: ZooArea[] = [
+  { id: "a-pay", name: "Payments", repoPaths: ["/tmp/payments"], createdAt: 900 },
+  { id: "a-growth", name: "Growth", createdAt: 950 },
+]
 
 const insights: ZooInsight[] = [
   {
@@ -39,6 +45,7 @@ const ideas: ZooIdea[] = [
     rationale: "Silent declines cost real money.",
     status: "promoted",
     insightIds: ["i-1"],
+    areaId: "a-pay",
     createdAt: 1000,
     itemId: "t-1",
   },
@@ -59,6 +66,7 @@ const items: ZooItem[] = [
     ideaId: "d-1",
     title: "Retry failed payments",
     stage: "decision",
+    areaId: "a-pay",
     sessionIds: ["s-42"],
     decisions: [
       { at: 1500, actor: "user", note: "Promoted for research" },
@@ -105,6 +113,8 @@ describe("Inbox decision cards", () => {
         selectedId={entries[0]?.id ?? null}
         onSelect={() => {}}
         context={{ repoId: "r-1", baseUrl: "http://localhost:4620" }}
+        areas={areas}
+        showAreas
         onRefresh={async () => {}}
         onSetAside={() => {}}
         onSynthesize={() => {}}
@@ -140,7 +150,7 @@ describe("DetailPane", () => {
     const entry = entries.find((row) => row.item?.id === "t-1")!
     const html = renderToStaticMarkup(
       <TooltipProvider>
-        <DetailPane entry={entry} onClose={() => {}} onOpenSession={() => {}} />
+        <DetailPane entry={entry} areas={areas} onAssignArea={() => {}} onClose={() => {}} onOpenSession={() => {}} />
       </TooltipProvider>,
     )
     expect(html).toContain("Retry failed payments")
@@ -150,5 +160,95 @@ describe("DetailPane", () => {
     expect(html).toContain("Research done: the retry hook already exists.")
     expect(html).toContain("Sessions · 1")
     expect(html).toContain("s-42")
+  })
+})
+
+// ---- Areas in the workspace ------------------------------------------------
+
+function inbox(showAreas: boolean) {
+  return renderToStaticMarkup(
+    <TooltipProvider>
+      <InboxView
+        entries={entries}
+        inFlight={[]}
+        selectedId={null}
+        onSelect={() => {}}
+        context={{ repoId: "r-1", baseUrl: "http://localhost:4620" }}
+        areas={areas}
+        showAreas={showAreas}
+        onRefresh={async () => {}}
+        onSetAside={() => {}}
+        onSynthesize={() => {}}
+        onOpenSession={() => {}}
+        loading={false}
+      />
+    </TooltipProvider>,
+  )
+}
+
+describe("area switcher", () => {
+  it("opens on All areas and keeps the menu itself out of the way", () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <ZooWorkspace baseUrl={null} repoId={null} onOpenChat={() => {}} />
+      </TooltipProvider>,
+    )
+    expect(html).toContain("All areas")
+    expect(html).toContain('aria-label="Switch area"')
+  })
+})
+
+describe("area badges", () => {
+  it("badges each card with its area under All areas", () => {
+    const html = inbox(true)
+    expect(html).toContain("Area: Payments")
+  })
+
+  it("drops the badge when a single area is already selected", () => {
+    expect(inbox(false)).not.toContain("Area: Payments")
+  })
+
+  it("badges board cards the same way", () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <BoardView
+          ideas={ideas}
+          items={items}
+          areas={areas}
+          showAreas
+          selectedId={null}
+          onSelectIdea={() => {}}
+          onSelectItem={() => {}}
+        />
+      </TooltipProvider>,
+    )
+    expect(html).toContain("Area: Payments")
+    expect(html).toContain("Retry failed payments")
+  })
+})
+
+describe("DetailPane area assignment", () => {
+  it("shows the item's area and offers to move it", () => {
+    const entry = entries.find((row) => row.item?.id === "t-1")!
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <DetailPane entry={entry} areas={areas} onAssignArea={() => {}} onClose={() => {}} />
+      </TooltipProvider>,
+    )
+    expect(html).toContain("Area")
+    expect(html).toContain("Payments")
+    expect(html).toContain('aria-label="Change area"')
+  })
+
+  it("says so plainly when a row belongs to no area", () => {
+    const unassigned = entries.find((row) => row.idea?.id === "d-2")!
+    expect(unassigned.areaId).toBeUndefined()
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <DetailPane entry={unassigned} areas={areas} onAssignArea={() => {}} onClose={() => {}} />
+      </TooltipProvider>,
+    )
+    expect(html).toContain("Unassigned")
+    expect(html).toContain("visible in every area")
   })
 })

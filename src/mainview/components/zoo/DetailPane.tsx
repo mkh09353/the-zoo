@@ -9,9 +9,10 @@ import { useEffect, useState, type ReactNode } from "react"
 import { cn } from "~/lib/cn"
 import { relativeTime } from "~/lib/format"
 import { openExternal } from "~/lib/openExternal"
-import { zooGetArtifact, type ZooArtifactDetail } from "~/lib/zoo"
+import { zooGetArtifact, type ZooArea, type ZooAreaKind, type ZooArtifactDetail } from "~/lib/zoo"
 import type { InboxEntry } from "~/lib/zooInbox"
 import { latestSessionId } from "~/lib/zooItemFlow"
+import { AreaAssignMenu } from "./AreaSwitcher"
 import { Button } from "../ui/button"
 import {
   Badge,
@@ -35,10 +36,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export function DetailPane({
   entry,
+  areas,
+  onAssignArea,
+  areaBusy = false,
   onClose,
   onOpenSession,
 }: {
   entry: InboxEntry
+  areas: ZooArea[]
+  /** Reassign this row to another area (or to none). */
+  onAssignArea?: (kind: ZooAreaKind, id: string, areaId: string | null) => void
+  areaBusy?: boolean
   onClose: () => void
   onOpenSession?: (sessionId: string) => void
 }) {
@@ -89,6 +97,29 @@ export function DetailPane({
       </header>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+        {(entry.item || entry.idea) && (
+          <Section title="Area">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <AreaAssignMenu
+                areas={areas}
+                areaId={entry.areaId}
+                disabled={areaBusy || !onAssignArea}
+                onAssign={(areaId) => {
+                  // An idea and the item it became always move together, so
+                  // whichever half is on screen can carry the pair.
+                  if (entry.item) onAssignArea?.("item", entry.item.id, areaId)
+                  else if (entry.idea) onAssignArea?.("idea", entry.idea.id, areaId)
+                }}
+              />
+              {!entry.areaId && (
+                <span className="min-w-0 break-words text-[11.5px] text-muted-foreground">
+                  Unassigned — visible in every area.
+                </span>
+              )}
+            </div>
+          </Section>
+        )}
+
         <Section title="Why it's here">
           <p className="min-w-0 whitespace-pre-wrap break-words text-[12.5px] text-muted-foreground leading-relaxed">
             {entry.why}

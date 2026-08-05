@@ -8,8 +8,10 @@ import { LayoutGrid } from "lucide-react"
 import type { ReactNode } from "react"
 import { cn } from "~/lib/cn"
 import { relativeTime } from "~/lib/format"
-import { ITEM_STAGES, type ZooIdea, type ZooItem, type ZooItemStage } from "~/lib/zoo"
+import { ITEM_STAGES, type ZooArea, type ZooIdea, type ZooItem, type ZooItemStage } from "~/lib/zoo"
+import { areaName } from "~/lib/zooAreas"
 import { itemsByStage } from "~/lib/zooInbox"
+import { AreaBadge } from "./AreaSwitcher"
 import { Badge, EmptyState, IDEA_TYPE_LABEL, IDEA_TYPE_TONE, STAGE_LABEL, STAGE_TONE, ViewHeader } from "./parts"
 
 function Column({
@@ -36,12 +38,14 @@ function Card({
   title,
   meta,
   badge,
+  area,
   selected,
   onSelect,
 }: {
   title: string
   meta: string
   badge: ReactNode
+  area?: string | null
   selected: boolean
   onSelect: () => void
 }) {
@@ -59,8 +63,9 @@ function Card({
         <span className="min-w-0 break-words font-medium text-[12.5px] text-foreground leading-snug">
           {title}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5">
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
           {badge}
+          {area && <AreaBadge name={area} />}
           <span className="truncate text-[11px] text-muted-foreground">{meta}</span>
         </span>
       </button>
@@ -71,12 +76,17 @@ function Card({
 export function BoardView({
   ideas,
   items,
+  areas,
+  showAreas,
   selectedId,
   onSelectIdea,
   onSelectItem,
 }: {
-  ideas: ZooIdea[]
-  items: ZooItem[]
+  ideas: readonly ZooIdea[]
+  items: readonly ZooItem[]
+  areas: ZooArea[]
+  /** Badge each card with its area — only useful under "All areas". */
+  showAreas: boolean
   selectedId: string | null
   onSelectIdea: (idea: ZooIdea) => void
   onSelectItem: (item: ZooItem) => void
@@ -106,6 +116,7 @@ export function BoardView({
                 title={idea.title}
                 meta={relativeTime(idea.createdAt)}
                 badge={<Badge className={IDEA_TYPE_TONE[idea.type]}>{IDEA_TYPE_LABEL[idea.type]}</Badge>}
+                area={showAreas ? areaName(areas, idea.areaId) : null}
                 selected={selectedId === `idea:${idea.id}`}
                 onSelect={() => onSelectIdea(idea)}
               />
@@ -119,6 +130,7 @@ export function BoardView({
                   title={item.title}
                   meta={`${relativeTime(item.updatedAt)} · ${item.sessionIds.length} session${item.sessionIds.length === 1 ? "" : "s"}`}
                   badge={<Badge className={STAGE_TONE[item.stage]}>{STAGE_LABEL[item.stage]}</Badge>}
+                  area={showAreas ? areaName(areas, item.areaId) : null}
                   selected={selectedId === `item:${item.id}`}
                   onSelect={() => onSelectItem(item)}
                 />

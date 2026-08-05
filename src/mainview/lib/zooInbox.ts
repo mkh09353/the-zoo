@@ -6,6 +6,7 @@
 // (lib/zooInbox.test.ts). Every server round trip lives in lib/zoo.ts and
 // lib/zooDecisions.ts.
 
+import { inArea, type AreaSelection } from "./zooAreas"
 import type { ZooIdea, ZooIdeaStatus, ZooIdeaType, ZooInsight, ZooItem, ZooItemStage } from "./zoo"
 
 export type InboxKind = "idea" | "item" | "insights"
@@ -28,6 +29,8 @@ export type InboxEntry = {
   idea?: ZooIdea
   item?: ZooItem
   insights: ZooInsight[]
+  /** Area this decision belongs to; absent means unassigned (shown everywhere). */
+  areaId?: string
 }
 
 export type InboxInput = {
@@ -36,6 +39,8 @@ export type InboxInput = {
   insights: readonly ZooInsight[]
   /** Entry ids the user said "not now" to in this session (client-side only). */
   dismissed?: readonly string[]
+  /** Area to scope the queue to; null (the default) means "All areas". */
+  areaId?: AreaSelection
 }
 
 /** Item stages that mean "a human has to decide something". */
@@ -121,6 +126,7 @@ function itemEntry(
     why: ITEM_WHY[item.stage] ?? ITEM_WHY_FALLBACK[item.stage],
     at: item.updatedAt,
     urgency: 0,
+    ...(item.areaId ? { areaId: item.areaId } : {}),
     item,
     ...(idea ? { idea } : {}),
     insights: idea ? insightsForIdea(idea, index) : [],
@@ -135,6 +141,7 @@ function ideaEntry(idea: ZooIdea, index: Map<string, ZooInsight>): InboxEntry {
     why: idea.status === "proposed" ? IDEA_WHY[idea.type] : IDEA_STATUS_WHY[idea.status],
     at: idea.createdAt,
     urgency: 1,
+    ...(idea.areaId ? { areaId: idea.areaId } : {}),
     idea,
     insights: insightsForIdea(idea, index),
   }
@@ -169,33 +176,42 @@ export function entryForIdea(idea: ZooIdea, insights: readonly ZooInsight[]): In
  * are not decisions — they belong to the Board, not the Inbox.
  */
 export function buildInbox(input: InboxInput): InboxEntry[] {
+  // The index and the cited set deliberately span EVERY area: an idea in one
+  // area may cite an insight recorded in another, and that evidence still has
+  // to resolve (and must not resurface as an uncited signal elsewhere).
   const index = insightIndex(input.insights)
   const cited = citedInsightIds(input.ideas)
   const dismissed = new Set(input.dismissed ?? [])
+  const area = input.areaId ?? null
   const entries: InboxEntry[] = []
 
   for (const item of input.items) {
     if (!WAITING.has(item.stage)) continue
+    if (!inArea(item, area)) continue
     entries.push(itemEntry(item, input.ideas, index))
   }
 
   for (const idea of input.ideas) {
     if (idea.status !== "proposed") continue
+    if (!inArea(idea, area)) continue
     entries.push(ideaEntry(idea, index))
   }
 
   const byPass = new Map<string, ZooInsight[]>()
   for (const insight of input.insights) {
     if (cited.has(insight.id)) continue
+    if (!inArea(insight, area)) continue
     const group = byPass.get(insight.passId)
     if (group) group.push(insight)
     else byPass.set(insight.passId, [insight])
   }
   for (const [passId, group] of byPass) {
     const at = group.reduce((newest, insight) => Math.max(newest, insight.createdAt), 0)
+    const groupArea = group[0]?.areaId
     entries.push({
       id: `insights:${passId}`,
       kind: "insights",
+      ...(groupArea && group.every((insight) => insight.areaId === groupArea) ? { areaId: groupArea } : {}),
       title: `${plural(group.length, "fresh signal")} with nothing proposed yet`,
       why: "A run recorded these insights and no idea cites them. Synthesize them into proposals, or set them aside.",
       at,
@@ -210,10 +226,10 @@ export function buildInbox(input: InboxInput): InboxEntry[] {
 }
 
 /** Items the factory is actively working (the "in flight" strip, not a decision). */
-export function inFlightItems(items: readonly ZooItem[]): ZooItem[] {
+export function inFlightItems(items: readonly ZooItem[], areaId: AreaSelection = null): ZooItem[] {
   const stages = new Set<string>(IN_FLIGHT_STAGES)
   return items
-    .filter((item) => stages.has(item.stage))
+    .filter((item) => stages.has(item.stage) && inArea(item, areaId))
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 

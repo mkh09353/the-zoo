@@ -14,11 +14,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useZooBoard } from "~/hooks/useZooBoard"
 import { cn } from "~/lib/cn"
 import { DRAG_REGION, NO_DRAG_REGION } from "~/lib/dragRegion"
-import { ZOO_UNAVAILABLE, type ZooIdea, type ZooItem } from "~/lib/zoo"
+import {
+  ZOO_UNAVAILABLE,
+  zooAssignArea,
+  zooCreateArea,
+  zooDeleteArea,
+  zooUpdateArea,
+  type ZooAreaKind,
+  type ZooIdea,
+  type ZooItem,
+} from "~/lib/zoo"
+import {
+  loadSelectedArea,
+  resolveSelection,
+  saveSelectedArea,
+  scopeBoard,
+  type AreaSelection,
+} from "~/lib/zooAreas"
 import { startFactoryChat } from "~/lib/zooChat"
+import { resolveRepoForArea } from "~/lib/zooDecisions"
 import { runExtraction, type ExtractionPhase } from "~/lib/zooExtraction"
 import { buildInbox, entryForIdea, entryForItem, inFlightItems, type InboxEntry } from "~/lib/zooInbox"
 import { runSynthesis, runTriage } from "~/lib/zooSynthesis"
+import { AreaSwitcher } from "./AreaSwitcher"
 import { Button } from "../ui/button"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip"
 import { BoardView } from "./BoardView"
@@ -51,6 +69,10 @@ export function ZooWorkspace({
 }) {
   const board = useZooBoard()
   const [view, setView] = useState<ZooView>("inbox")
+  // Which product is in view. Disposable renderer preference, like the theme.
+  const [selectedArea, setSelectedArea] = useState<AreaSelection>(loadSelectedArea)
+  const [areaBusy, setAreaBusy] = useState(false)
+  const [areaError, setAreaError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [setAside, setSetAside] = useState<string[]>([])
   const [talking, setTalking] = useState(false)
@@ -60,13 +82,32 @@ export function ZooWorkspace({
   const [elapsed, setElapsed] = useState(0)
   const runningRef = useRef<Set<RunKind>>(new Set())
 
-  const { ideas, items, insights, refresh } = board
+  const { areas, ideas, items, insights, refresh } = board
+
+  // A stored area that has since been deleted must not hide the whole board.
+  useEffect(() => {
+    setSelectedArea((current) => resolveSelection(current, areas))
+  }, [areas])
+  useEffect(() => {
+    saveSelectedArea(selectedArea)
+  }, [selectedArea])
+
+  const area = useMemo(
+    () => areas.find((row) => row.id === selectedArea) ?? null,
+    [areas, selectedArea],
+  )
+  const fullBoard = useMemo(
+    () => ({ sources: board.status?.sources ?? [], insights, ideas, items }),
+    [board.status, insights, ideas, items],
+  )
+  /** Board narrowed to the selected area (unassigned rows stay visible). */
+  const scoped = useMemo(() => scopeBoard(fullBoard, selectedArea), [fullBoard, selectedArea])
 
   const entries = useMemo(
-    () => buildInbox({ ideas, items, insights, dismissed: setAside }),
-    [ideas, items, insights, setAside],
+    () => buildInbox({ ideas, items, insights, dismissed: setAside, areaId: selectedArea }),
+    [ideas, items, insights, setAside, selectedArea],
   )
-  const inFlight = useMemo(() => inFlightItems(items), [items])
+  const inFlight = useMemo(() => inFlightItems(items, selectedArea), [items, selectedArea])
 
   /** Every selectable thing, queued or not, in the shape the detail pane wants. */
   const catalog = useMemo(() => {
@@ -87,6 +128,42 @@ export function ZooWorkspace({
   useEffect(() => {
     if (selectedId && !catalog.has(selectedId)) setSelectedId(null)
   }, [catalog, selectedId])
+
+  /** Every area mutation shares one busy/error/refresh path. */
+  const areaAction = useCallback(
+    async (run: () => Promise<{ ok: boolean; error?: string }>) => {
+      setAreaBusy(true)
+      setAreaError(null)
+      const result = await run()
+      setAreaBusy(false)
+      if (!result.ok && result.error) setAreaError(result.error)
+      await refresh()
+      return result.ok
+    },
+    [refresh],
+  )
+
+  const createArea = (name: string, repoPaths: string[]) =>
+    void areaAction(async () => {
+      const result = await zooCreateArea(name, repoPaths)
+      // Land in the area you just made — that is what creating one is for.
+      if (result.ok) setSelectedArea(result.area.id)
+      return result
+    })
+
+  const renameArea = (areaId: string, name: string, repoPaths: string[]) =>
+    void areaAction(() => zooUpdateArea(areaId, { name, repoPaths }))
+
+  const deleteArea = (areaId: string) =>
+    void areaAction(async () => {
+      const result = await zooDeleteArea(areaId)
+      // Deleting an area only unassigns its rows; fall back to seeing them all.
+      if (result.ok) setSelectedArea(null)
+      return result
+    })
+
+  const assignArea = (kind: ZooAreaKind, id: string, areaId: string | null) =>
+    void areaAction(() => zooAssignArea(kind, id, areaId))
 
   const anyRunning = Object.values(runs).some((run) => run.kind === "running")
   useEffect(() => {
@@ -116,7 +193,7 @@ export function ZooWorkspace({
 
       let state: RunState
       if (kind === "extraction") {
-        const result = await runExtraction({ baseUrl, onPhase })
+        const result = await runExtraction({ baseUrl, onPhase, areaId: selectedArea })
         state = result.ok
           ? {
               kind: "done",
@@ -124,7 +201,7 @@ export function ZooWorkspace({
             }
           : { kind: "error", error: result.error }
       } else if (kind === "synthesis") {
-        const result = await runSynthesis({ baseUrl, onPhase })
+        const result = await runSynthesis({ baseUrl, onPhase, areaId: selectedArea })
         state = result.ok
           ? {
               kind: "done",
@@ -132,7 +209,9 @@ export function ZooWorkspace({
             }
           : { kind: "error", error: result.error }
       } else {
-        const result = await runTriage(repoId ?? "", { baseUrl, onPhase })
+        // An area that names a repo triages ITS codebase, not the selected one.
+        const bound = await resolveRepoForArea(baseUrl, area, repoId)
+        const result = await runTriage(bound ?? "", { baseUrl, onPhase, areaId: selectedArea })
         state = result.ok
           ? {
               kind: "done",
@@ -144,14 +223,14 @@ export function ZooWorkspace({
       setRun(kind, state)
       await refresh()
     },
-    [baseUrl, refresh, repoId],
+    [area, baseUrl, refresh, repoId, selectedArea],
   )
 
   const talkToFactory = async () => {
     if (talking) return
     setTalking(true)
     setHeaderError(null)
-    const result = await startFactoryChat(baseUrl, repoId)
+    const result = await startFactoryChat(baseUrl, repoId, { area })
     setTalking(false)
     if (!result.ok) {
       setHeaderError(result.error)
@@ -187,7 +266,9 @@ export function ZooWorkspace({
       inFlight={inFlight}
       selectedId={selectedId}
       onSelect={setSelectedId}
-      context={{ repoId, baseUrl }}
+      context={{ repoId, baseUrl, area }}
+      areas={areas}
+      showAreas={selectedArea === null}
       onRefresh={refresh}
       onSetAside={(id) => {
         setSetAside((prev) => (prev.includes(id) ? prev : [...prev, id]))
@@ -200,8 +281,10 @@ export function ZooWorkspace({
     />
   ) : view === "board" ? (
     <BoardView
-      ideas={ideas}
-      items={items}
+      ideas={scoped.ideas}
+      items={scoped.items}
+      areas={areas}
+      showAreas={selectedArea === null}
       selectedId={selectedId}
       onSelectIdea={(idea: ZooIdea) => setSelectedId(`idea:${idea.id}`)}
       onSelectItem={(item: ZooItem) => setSelectedId(`item:${item.id}`)}
@@ -209,13 +292,16 @@ export function ZooWorkspace({
   ) : (
     <SourcesView
       status={board.status}
+      sources={scoped.sources}
+      areaId={selectedArea}
+      areaName={area?.name ?? null}
       runs={runs}
       elapsed={elapsed}
       onRun={(kind) => void startRun(kind)}
       onRefresh={refresh}
       baseUrl={baseUrl}
       repoId={repoId}
-      insightCount={insights.length}
+      insightCount={scoped.insights.length}
     />
   )
 
@@ -230,6 +316,20 @@ export function ZooWorkspace({
         <div className="min-w-0">
           <p className="truncate font-semibold text-[13.5px] text-foreground tracking-tight">The Zoo</p>
           <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
+        </div>
+        <div className={cn(NO_DRAG_REGION, "flex min-w-0 shrink items-center")}>
+          <AreaSwitcher
+            areas={areas}
+            selected={selectedArea}
+            onSelect={setSelectedArea}
+            board={fullBoard}
+            onCreate={createArea}
+            onRename={renameArea}
+            onDelete={deleteArea}
+            busy={areaBusy}
+            error={areaError}
+            disabled={!board.available}
+          />
         </div>
         <div aria-hidden className="h-full min-w-6 flex-1" />
         <div className={cn(NO_DRAG_REGION, "flex shrink-0 items-center gap-1.5")}>
@@ -268,6 +368,11 @@ export function ZooWorkspace({
       {headerError && (
         <div className="shrink-0 px-4 pt-2">
           <Notice text={headerError} />
+        </div>
+      )}
+      {areaError && (
+        <div className="shrink-0 px-4 pt-2">
+          <Notice text={areaError} />
         </div>
       )}
       {board.error && (
@@ -314,6 +419,9 @@ export function ZooWorkspace({
         {selected && (
           <DetailPane
             entry={selected}
+            areas={areas}
+            onAssignArea={assignArea}
+            areaBusy={areaBusy}
             onClose={() => setSelectedId(null)}
             {...(openSession ? { onOpenSession: openSession } : {})}
           />

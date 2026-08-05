@@ -7,10 +7,12 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   zooAvailable,
+  zooListAreas,
   zooListIdeas,
   zooListInsights,
   zooListItems,
   zooStatus,
+  type ZooArea,
   type ZooIdea,
   type ZooInsight,
   type ZooItem,
@@ -24,6 +26,8 @@ export type ZooBoard = {
   /** False outside the desktop app: the store lives in the Bun process. */
   available: boolean
   status: ZooStatus | null
+  /** Products sharing this one board. Empty is normal, not an error state. */
+  areas: ZooArea[]
   insights: ZooInsight[]
   ideas: ZooIdea[]
   items: ZooItem[]
@@ -35,6 +39,7 @@ export type ZooBoard = {
 export function useZooBoard(): ZooBoard {
   const [available] = useState(zooAvailable)
   const [status, setStatus] = useState<ZooStatus | null>(null)
+  const [areas, setAreas] = useState<ZooArea[]>([])
   const [insights, setInsights] = useState<ZooInsight[]>([])
   const [ideas, setIdeas] = useState<ZooIdea[]>([])
   const [items, setItems] = useState<ZooItem[]>([])
@@ -54,11 +59,12 @@ export function useZooBoard(): ZooBoard {
       setLoading(false)
       return
     }
-    const [next, insightList, ideaList, itemList] = await Promise.all([
+    const [next, insightList, ideaList, itemList, areaList] = await Promise.all([
       zooStatus(),
       zooListInsights(),
       zooListIdeas(),
       zooListItems(),
+      zooListAreas(),
     ])
     if (!alive.current) return
     if (next.ok) {
@@ -77,6 +83,7 @@ export function useZooBoard(): ZooBoard {
     if (insightList.ok) setInsights(insightList.insights)
     if (ideaList.ok) setIdeas(ideaList.ideas)
     if (itemList.ok) setItems(itemList.items)
+    if (areaList.ok) setAreas(areaList.areas)
     setLoading(false)
   }, [])
 
@@ -92,5 +99,5 @@ export function useZooBoard(): ZooBoard {
     return () => clearInterval(timer)
   }, [available, backfilling, refresh])
 
-  return { available, status, insights, ideas, items, error, loading, refresh }
+  return { available, status, areas, insights, ideas, items, error, loading, refresh }
 }

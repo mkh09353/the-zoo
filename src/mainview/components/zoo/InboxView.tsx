@@ -13,7 +13,9 @@ import { relativeTime } from "~/lib/format"
 import { decide, goBlockedReason, noteTarget, type DecisionContext } from "~/lib/zooDecisions"
 import type { InboxEntry } from "~/lib/zooInbox"
 import { latestSessionId } from "~/lib/zooItemFlow"
-import type { ZooItem } from "~/lib/zoo"
+import type { ZooArea, ZooItem } from "~/lib/zoo"
+import { areaName } from "~/lib/zooAreas"
+import { AreaBadge } from "./AreaSwitcher"
 import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
 import {
@@ -38,6 +40,8 @@ export function InboxView({
   selectedId,
   onSelect,
   context,
+  areas,
+  showAreas,
   onRefresh,
   onSetAside,
   onSynthesize,
@@ -50,6 +54,9 @@ export function InboxView({
   selectedId: string | null
   onSelect: (id: string) => void
   context: DecisionContext
+  areas: ZooArea[]
+  /** Badge each card with its area — only useful under "All areas". */
+  showAreas: boolean
   onRefresh: () => Promise<void>
   /** "Not now" on a signals card is a local set-aside — there is nothing to write. */
   onSetAside: (entryId: string) => void
@@ -86,6 +93,7 @@ export function InboxView({
     const blocked = signals ? null : goBlockedReason(entry, context)
     const target = noteTarget(entry)
     const sessionId = entry.item ? latestSessionId(entry.item) : null
+    const entryArea = areaName(areas, entry.areaId)
     const noteValue = notes[entry.id] ?? ""
     const showNote = noteOpen[entry.id] === true
 
@@ -111,6 +119,7 @@ export function InboxView({
                 <Badge className={IDEA_TYPE_TONE[entry.idea.type]}>{IDEA_TYPE_LABEL[entry.idea.type]}</Badge>
               )}
               {signals && <Badge className="border-primary/30 bg-primary/10 text-primary">Signals</Badge>}
+              {showAreas && entryArea && <AreaBadge name={entryArea} />}
               <span className="text-[11px] text-muted-foreground/80">{relativeTime(entry.at)}</span>
             </span>
             <span className="min-w-0 whitespace-pre-wrap break-words font-medium text-[14.5px] text-foreground leading-snug">

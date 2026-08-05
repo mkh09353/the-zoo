@@ -13,7 +13,9 @@
 //         not now  -> drop it, with the note as the reason.
 //         note     -> send it to the item's session and log it.
 
-import { zooSetIdeaStatus, type ZooIdea, type ZooItem } from "./zoo"
+import { listRepos } from "./api"
+import { zooSetIdeaStatus, type ZooArea, type ZooIdea, type ZooItem } from "./zoo"
+import { repoIdForArea } from "./zooAreas"
 import { advanceItem, dropItem, latestSessionId, nextStage, promoteIdea, sendItemFeedback } from "./zooItemFlow"
 
 export type DecisionAction = "go" | "not-now" | "note"
@@ -23,8 +25,34 @@ export type DecisionOutcome =
   | { ok: false; error: string }
 
 export type DecisionContext = {
+  /** Repository currently selected in the app — the fallback binding. */
   repoId?: string | null
   baseUrl?: string | null
+  /** Area the decision belongs to; its repo paths win over `repoId`. */
+  area?: ZooArea | null
+}
+
+/**
+ * Which repository a session spawned for this decision should be bound to.
+ *
+ * An area that names a repo owns its work, so its path wins over whatever the
+ * app happens to have selected. Anything unresolvable — no area, no paths, no
+ * matching registered repo, an unreachable server — falls back to the selected
+ * repository rather than failing the decision.
+ */
+export async function resolveRepoForArea(
+  baseUrl: string | null | undefined,
+  area: ZooArea | null | undefined,
+  fallbackRepoId: string | null | undefined,
+): Promise<string | null> {
+  const fallback = fallbackRepoId ?? null
+  if (!baseUrl || !area?.repoPaths?.length) return fallback
+  try {
+    const { repos } = await listRepos(baseUrl)
+    return repoIdForArea(area, repos ?? []) ?? fallback
+  } catch {
+    return fallback
+  }
 }
 
 /** Whether a card's "go" can do anything right now, and why not when it cannot. */
@@ -37,7 +65,12 @@ export function goBlockedReason(
       ? null
       : `An item in "${entry.item.stage}" has nowhere left to advance.`
   }
-  if (entry.idea) return context.repoId ? null : "Select a repository first."
+  // An area that names a repo supplies the binding itself, so a promotion is
+  // possible even with no repository selected in the app.
+  if (entry.idea) {
+    if (context.repoId || context.area?.repoPaths?.length) return null
+    return "Select a repository first, or give this area a repo path."
+  }
   return null
 }
 
@@ -61,7 +94,8 @@ async function decideIdea(
     return { ok: false, error: "This idea has no session yet — send it with Go." }
   }
 
-  const promoted = await promoteIdea(idea, context.repoId ?? null, { baseUrl: context.baseUrl })
+  const repoId = await resolveRepoForArea(context.baseUrl, context.area, context.repoId)
+  const promoted = await promoteIdea(idea, repoId, { baseUrl: context.baseUrl })
   if (!promoted.ok) return { ok: false, error: promoted.error }
 
   const trimmed = note.trim()

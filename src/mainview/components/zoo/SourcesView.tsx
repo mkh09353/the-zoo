@@ -8,6 +8,7 @@ import { useState, type FormEvent } from "react"
 import { relativeTime } from "~/lib/format"
 import { nativePickerAvailable, pickFolder } from "~/lib/pickFolder"
 import { zooConnectLinear, zooConnectTranscripts, zooStartBackfill, type ZooSource, type ZooStatus } from "~/lib/zoo"
+import type { AreaSelection } from "~/lib/zooAreas"
 import type { ExtractionPhase } from "~/lib/zooExtraction"
 import { Button } from "../ui/button"
 import { Input } from "../ui/input"
@@ -58,6 +59,9 @@ export function RunLine({ state, elapsed }: { state: RunState; elapsed: number }
 
 export function SourcesView({
   status,
+  sources,
+  areaId,
+  areaName,
   runs,
   elapsed,
   onRun,
@@ -67,6 +71,11 @@ export function SourcesView({
   insightCount,
 }: {
   status: ZooStatus | null
+  /** Sources narrowed to the selected area (unassigned ones stay visible). */
+  sources: readonly ZooSource[]
+  /** Area new sources are connected into; null = unassigned. */
+  areaId: AreaSelection
+  areaName: string | null
   runs: Record<RunKind, RunState>
   elapsed: number
   onRun: (kind: RunKind) => void
@@ -80,7 +89,6 @@ export function SourcesView({
   const [connecting, setConnecting] = useState<"linear" | "transcripts" | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const sources = status?.sources ?? []
   const artifactCount = status?.artifactCount ?? 0
 
   const connectLinear = async (event: FormEvent<HTMLFormElement>) => {
@@ -89,7 +97,7 @@ export function SourcesView({
     if (!key || connecting) return
     setConnecting("linear")
     setError(null)
-    const result = await zooConnectLinear(key)
+    const result = await zooConnectLinear(key, areaId)
     setConnecting(null)
     if (!result.ok) {
       setError(result.error)
@@ -104,7 +112,7 @@ export function SourcesView({
     if (!target || connecting) return
     setConnecting("transcripts")
     setError(null)
-    const result = await zooConnectTranscripts(target)
+    const result = await zooConnectTranscripts(target, areaId)
     setConnecting(null)
     if (!result.ok) {
       setError(result.error)
@@ -131,10 +139,16 @@ export function SourcesView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ViewHeader
         title="Sources"
-        subtitle={`${artifactCount} artifact${artifactCount === 1 ? "" : "s"} · ${insightCount} insight${insightCount === 1 ? "" : "s"}`}
+        subtitle={`${artifactCount} artifact${artifactCount === 1 ? "" : "s"} · ${insightCount} insight${insightCount === 1 ? "" : "s"}${areaName ? ` · ${areaName}` : ""}`}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-8">
         {error && <Notice text={error} />}
+        {areaName && (
+          <Notice
+            text={`Sources you connect here join the “${areaName}” area. Sources with no area stay visible in every one.`}
+            tone="muted"
+          />
+        )}
 
         {sources.length === 0 ? (
           <EmptyState

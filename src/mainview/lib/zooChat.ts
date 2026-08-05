@@ -5,6 +5,8 @@
 // plus an opening turn — no dedicated endpoint.
 
 import { createSession, sendMessage } from "./api"
+import type { ZooArea } from "./zoo"
+import { resolveRepoForArea } from "./zooDecisions"
 import { errorMessage } from "./zooExtraction"
 
 export const FACTORY_OPENER =
@@ -15,11 +17,19 @@ export type FactoryChatResult = { ok: true; sessionId: string } | { ok: false; e
 export async function startFactoryChat(
   baseUrl: string | null | undefined,
   repoId: string | null | undefined,
-  opener: string = FACTORY_OPENER,
+  /** Area in view: its repo binds the conversation, and it frames the opener. */
+  opts: { area?: ZooArea | null; opener?: string } = {},
 ): Promise<FactoryChatResult> {
   if (!baseUrl) return { ok: false, error: "Talking to the Factory needs a connected Chunky server." }
+  const area = opts.area ?? null
+  const opener =
+    opts.opener ??
+    (area
+      ? `${FACTORY_OPENER}\n\nI am looking at the "${area.name}" area — focus there, but say so if something outside it matters.`
+      : FACTORY_OPENER)
   try {
-    const { sessionId } = await createSession(baseUrl, repoId ?? null)
+    const bound = await resolveRepoForArea(baseUrl, area, repoId)
+    const { sessionId } = await createSession(baseUrl, bound)
     await sendMessage(baseUrl, sessionId, opener)
     return { ok: true, sessionId }
   } catch (err) {
