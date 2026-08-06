@@ -63,6 +63,10 @@ from the earlier builds that still used the Chunky app identity and state root.
 Use `v0.4.1` or newer on macOS; it fixes the complete app-bundle seal and the
 unsigned installer's Gatekeeper handling.
 
+`v0.4.2` is Developer ID signed. Until notarization credentials are configured,
+the Terminal installer removes quarantine after verifying that the signature is
+Developer ID signed but not yet accepted by Gatekeeper.
+
 Unsigned builds carry a complete ad-hoc signature so macOS can verify the app
 bundle is internally intact. Because an ad-hoc signature is not trusted by
 Gatekeeper, use the Terminal installer above; it removes quarantine only when a

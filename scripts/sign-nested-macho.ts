@@ -3,15 +3,18 @@ import { join } from "node:path"
 
 const developerId = process.env.ELECTROBUN_DEVELOPER_ID
 const buildDir = process.env.ELECTROBUN_BUILD_DIR
-const appName = process.env.ELECTROBUN_APP_NAME
 
-if (!developerId || !buildDir || !appName) {
+if (!developerId || !buildDir) {
   throw new Error(
-    "Nested Mach-O signing requires ELECTROBUN_DEVELOPER_ID, ELECTROBUN_BUILD_DIR, and ELECTROBUN_APP_NAME",
+    "Nested Mach-O signing requires ELECTROBUN_DEVELOPER_ID and ELECTROBUN_BUILD_DIR",
   )
 }
 
-const resourcesApp = join(buildDir, `${appName}.app`, "Contents", "Resources", "app")
+const appEntries = readdirSync(buildDir).filter((entry) => entry.endsWith(".app"))
+if (appEntries.length !== 1) {
+  throw new Error(`Expected exactly one app bundle under ${buildDir}, found ${appEntries.length}`)
+}
+const resourcesApp = join(buildDir, appEntries[0]!, "Contents", "Resources", "app")
 const machOMagic = new Set([
   0xfeedface, // MH_MAGIC
   0xcefaedfe, // MH_CIGAM

@@ -6,13 +6,12 @@ const isRelease = process.argv[2] === "build"
 const isStableRelease = process.argv.includes("--env=stable")
 // Signing credentials exist only in the tag-release workflow. Keeping this
 // false locally makes `bun run build` a useful unsigned release-build check.
-const signAndNotarize = isStableRelease
-  && process.env.GITHUB_ACTIONS === "true"
-  && process.env.ZOO_SIGN_RELEASE === "1"
+const signRelease = isStableRelease && process.env.ZOO_SIGN_RELEASE === "1"
+const notarizeRelease = signRelease && process.env.ZOO_NOTARIZE_RELEASE === "1"
 // A stable build without Apple credentials still needs a complete resource
 // seal. Electrobun's normal signing pass can create that with the ad-hoc
 // identity (`-`) after every generated resource has been written.
-if (isStableRelease && !signAndNotarize) {
+if (isStableRelease && !signRelease) {
   process.env.ELECTROBUN_DEVELOPER_ID = "-"
 }
 // Keep desktop bundle metadata in lockstep with the package/release tag.
@@ -106,14 +105,14 @@ export default {
       // Electrobun's default hardened-runtime entitlements include the Bun/JIT
       // allowances it needs, so no project-specific entitlements file is needed.
       codesign: isStableRelease,
-      notarize: signAndNotarize,
+      notarize: notarizeRelease,
     },
     linux: { bundleCEF },
     win: { bundleCEF },
   },
   // This hook prepares nested Mach-O files for Developer ID signing. Unsigned
   // stable builds use Electrobun's final app-signing pass with identity `-`.
-  scripts: signAndNotarize ? { postBuild: "scripts/sign-nested-macho.ts" } : undefined,
+  scripts: signRelease ? { postBuild: "scripts/sign-nested-macho.ts" } : undefined,
   release: {
     baseUrl: "https://github.com/mkh09353/the-zoo/releases/latest/download",
   },

@@ -43,7 +43,12 @@ signature_details="$(codesign -dv --verbose=4 "/Applications/The Zoo.app" 2>&1 |
 if codesign --verify --deep --strict "/Applications/The Zoo.app" >/dev/null 2>&1 \
   && printf '%s\n' "$signature_details" | grep -q '^Authority=Developer ID Application' \
   && printf '%s\n' "$signature_details" | grep -q '^Timestamp='; then
-  echo "Verified The Zoo's Developer ID signature; leaving macOS quarantine metadata intact."
+  if spctl --assess --type execute "/Applications/The Zoo.app" >/dev/null 2>&1; then
+    echo "Verified The Zoo's Developer ID signature and Gatekeeper acceptance."
+  else
+    echo "Verified The Zoo's Developer ID signature; removing quarantine because this release is not notarized yet."
+    xattr -dr com.apple.quarantine "/Applications/The Zoo.app" || true
+  fi
 else
   # Ad-hoc signatures make an unsigned bundle internally consistent but are not
   # trusted by Gatekeeper. Remove quarantine until releases are Developer ID
