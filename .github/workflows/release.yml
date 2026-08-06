@@ -56,6 +56,12 @@ jobs:
             echo "ZOO_SIGN_RELEASE=0" >> "$GITHUB_ENV"
           fi
 
+      - name: Refuse an unsigned release for a manually published tag
+        if: ${{ env.ZOO_SIGN_RELEASE != '1' }}
+        run: |
+          echo "This tag does not have CI signing credentials. Build and upload the Developer ID signed artifacts from the signing Mac instead." >&2
+          exit 1
+
       - name: Import Developer ID signing certificate
         if: ${{ env.ZOO_SIGN_RELEASE == '1' }}
         shell: bash
@@ -78,10 +84,6 @@ jobs:
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - run: bun run build
-
-      - name: Explain unsigned release
-        if: ${{ env.ZOO_SIGN_RELEASE != '1' }}
-        run: echo "Publishing an unsigned The Zoo build; the installer removes quarantine for unsigned artifacts."
 
       - name: Create or update GitHub Release and upload artifacts
         uses: softprops/action-gh-release@v2
