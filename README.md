@@ -60,6 +60,13 @@ the GitHub Release. The updater polls
 
 The first standalone Zoo release is `v0.4.0`; the version jump distinguishes it
 from the earlier builds that still used the Chunky app identity and state root.
+Use `v0.4.1` or newer on macOS; it fixes the complete app-bundle seal and the
+unsigned installer's Gatekeeper handling.
+
+Unsigned builds carry a complete ad-hoc signature so macOS can verify the app
+bundle is internally intact. Because an ad-hoc signature is not trusted by
+Gatekeeper, use the Terminal installer above; it removes quarantine only when a
+trusted Developer ID signature is absent.
 
 The Zoo installs alongside Chunky with a separate bundle identifier and uses
 `~/.zoo/state` for its desktop state, server discovery, auth, settings, and

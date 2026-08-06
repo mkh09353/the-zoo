@@ -9,6 +9,12 @@ const isStableRelease = process.argv.includes("--env=stable")
 const signAndNotarize = isStableRelease
   && process.env.GITHUB_ACTIONS === "true"
   && process.env.ZOO_SIGN_RELEASE === "1"
+// A stable build without Apple credentials still needs a complete resource
+// seal. Electrobun's normal signing pass can create that with the ad-hoc
+// identity (`-`) after every generated resource has been written.
+if (isStableRelease && !signAndNotarize) {
+  process.env.ELECTROBUN_DEVELOPER_ID = "-"
+}
 // Keep desktop bundle metadata in lockstep with the package/release tag.
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
   version: string
@@ -99,15 +105,14 @@ export default {
       icons: "assets/icon.iconset",
       // Electrobun's default hardened-runtime entitlements include the Bun/JIT
       // allowances it needs, so no project-specific entitlements file is needed.
-      codesign: signAndNotarize,
+      codesign: isStableRelease,
       notarize: signAndNotarize,
     },
     linux: { bundleCEF },
     win: { bundleCEF },
   },
-  // Electrobun signs Mach-O files in Contents/MacOS and .node files under
-  // Resources/app/bun, but not dylibs copied into Resources/app/node_modules.
-  // This hook runs after staging and before Electrobun signs/notarizes the app.
+  // This hook prepares nested Mach-O files for Developer ID signing. Unsigned
+  // stable builds use Electrobun's final app-signing pass with identity `-`.
   scripts: signAndNotarize ? { postBuild: "scripts/sign-nested-macho.ts" } : undefined,
   release: {
     baseUrl: "https://github.com/mkh09353/the-zoo/releases/latest/download",
