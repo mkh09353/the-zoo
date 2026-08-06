@@ -9,7 +9,7 @@
 // Data comes from hooks/useZooBoard.ts and every mutation goes through
 // lib/zoo*.ts — this file makes no server calls of its own.
 
-import { Factory, Inbox, LayoutGrid, LoaderCircle, MessagesSquare, Plug, RefreshCw } from "lucide-react"
+import { Factory, Inbox, LayoutGrid, LoaderCircle, MessagesSquare, Plug, RefreshCw, Settings2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useZooBoard } from "~/hooks/useZooBoard"
 import { cn } from "~/lib/cn"
@@ -48,10 +48,13 @@ import { IDLE_RUNS, SourcesView, type RunKind, type RunState } from "./SourcesVi
 
 type ZooView = "inbox" | "board" | "sources"
 
-const VIEWS: { id: ZooView; label: string; icon: typeof Inbox }[] = [
+type ZooNavView = ZooView | "setup"
+
+const VIEWS: { id: ZooNavView; label: string; icon: typeof Inbox }[] = [
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "board", label: "Board", icon: LayoutGrid },
   { id: "sources", label: "Sources", icon: Plug },
+  { id: "setup", label: "Setup", icon: Settings2 },
 ]
 
 export function ZooWorkspace({
@@ -59,6 +62,7 @@ export function ZooWorkspace({
   repoId,
   onOpenSession,
   onOpenChat,
+  onOpenSetup,
 }: {
   /** Live Chunky server, or null when there is none — runs stay disabled. */
   baseUrl?: string | null
@@ -67,6 +71,7 @@ export function ZooWorkspace({
   /** Show a session in the (secondary) chat surface. */
   onOpenSession?: (sessionId: string) => void
   onOpenChat: () => void
+  onOpenSetup?: () => void
 }) {
   const board = useZooBoard()
   const [view, setView] = useState<ZooView>("inbox")
@@ -412,7 +417,10 @@ export function ZooWorkspace({
               <button
                 key={id}
                 type="button"
-                onClick={() => setView(id)}
+                onClick={() => {
+                  if (id === "setup") onOpenSetup?.()
+                  else setView(id)
+                }}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "relative flex cursor-pointer flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10.5px] transition-colors",

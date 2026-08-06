@@ -361,6 +361,7 @@ export async function sendMessage(
   opts: {
     force?: boolean
     delivery?: MessageDelivery
+    skill?: string
     images?: { base64: string; mediaType: string }[]
   } = {},
 ): Promise<SendBlockedResponse | null> {
@@ -371,6 +372,7 @@ export async function sendMessage(
       text,
       ...(opts.force ? { force: true } : {}),
       ...(opts.delivery && opts.delivery !== "auto" ? { delivery: opts.delivery } : {}),
+      ...(opts.skill ? { skill: opts.skill } : {}),
       ...(opts.images?.length ? { images: opts.images } : {}),
     }),
   })

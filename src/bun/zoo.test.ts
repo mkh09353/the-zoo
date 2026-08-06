@@ -35,6 +35,46 @@ function setup(pages: ReturnType<typeof issue>[][] = [[issue("ZOO-1", "First")]]
   return zoo
 }
 
+test("persists setup-session metadata and credential names without exposing values", async () => {
+  let now = 100
+  const path = mkdtempSync(join(tmpdir(), "chunky-zoo-"))
+  const zoo = createZooManager({ dbPath: join(path, "zoo.db"), now: () => now })
+  cleanup.push({ path, zoo })
+  expect(await zoo.listSetupSessions({})).toEqual({ ok: true, sessions: [] })
+  const first = await zoo.recordSetupSession({ sessionId: " setup-1 ", title: " First " })
+  expect(first).toMatchObject({ ok: true, session: { sessionId: "setup-1", title: "First", createdAt: 100, lastActivityAt: 100 } })
+  now = 200
+  const updated = await zoo.recordSetupSession({ sessionId: "setup-1", title: " Second " })
+  expect(updated).toMatchObject({ ok: true, session: { title: "Second", createdAt: 100, lastActivityAt: 200 } })
+  now = 300
+  await zoo.recordSetupSession({ sessionId: "setup-2" })
+  expect(await zoo.listSetupSessions({})).toMatchObject({ ok: true, sessions: [{ sessionId: "setup-2" }, { sessionId: "setup-1", createdAt: 100 }] })
+  expect(await zoo.recordSetupSession({ sessionId: "   " })).toMatchObject({ ok: false })
+  expect(await zoo.recordSetupSession({ sessionId: "bad\0id" })).toMatchObject({ ok: false })
+  expect(await zoo.recordSetupSession({ sessionId: "setup-3", title: " \0 " })).toMatchObject({ ok: false })
+
+  const secret = "never-return-this-value"
+  expect(await zoo.setCredential({ name: " token ", value: secret })).toEqual({ ok: true, credential: { name: "token", createdAt: 300 } })
+  now = 400
+  await zoo.setCredential({ name: "other", value: "another-secret" })
+  const credentials = await zoo.listCredentials({})
+  expect(credentials).toMatchObject({ ok: true, credentials: [{ name: "other", createdAt: 400 }, { name: "token", createdAt: 300 }] })
+  expect(JSON.stringify(credentials)).not.toContain(secret)
+  expect(JSON.stringify(await zoo.setCredential({ name: "token", value: secret }))).not.toContain(secret)
+  expect(await zoo.setCredential({ name: " ", value: secret })).toMatchObject({ ok: false })
+  expect(await zoo.setCredential({ name: "bad\0name", value: secret })).toMatchObject({ ok: false })
+  expect(await zoo.setCredential({ name: "bad", value: ` ${secret} ` })).toMatchObject({ ok: true })
+  expect(await zoo.setCredential({ name: "bad", value: `bad\0${secret}` })).toEqual({ ok: false, error: "Invalid credential" })
+  expect(JSON.stringify(await zoo.deleteCredential({ name: `bad\0${secret}` }))).not.toContain(secret)
+  expect(await zoo.deleteCredential({ name: " token " })).toEqual({ ok: true })
+
+  zoo.close()
+  const reopened = createZooManager({ dbPath: join(path, "zoo.db"), now: () => 500 })
+  cleanup[cleanup.length - 1]!.zoo = reopened
+  expect(await reopened.listSetupSessions({})).toMatchObject({ ok: true, sessions: [{ sessionId: "setup-2" }, { sessionId: "setup-1" }] })
+  expect(await reopened.listCredentials({})).toMatchObject({ ok: true, credentials: [{ name: "bad" }, { name: "other" }] })
+})
+
 async function backfillDone(zoo: ZooManager, sourceId: string) {
   expect((await zoo.startBackfill({ sourceId })).ok).toBe(true)
   for (let i = 0; i < 50; i++) {

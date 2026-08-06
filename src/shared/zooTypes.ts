@@ -23,3 +23,6 @@ export type ZooWatchStatus = "ok" | "skipped" | "error"
 export type ZooRepoWatch = { id: string; sourceId: string; owner: string; name: string; label: string; areaId?: string; lastCheckAt?: number; lastStatus?: ZooWatchStatus; lastNote?: string; lastArtifactAt?: number; lastExtractAt?: number; createdAt: number }
 /** One watch's result from a check pass. */
 export type ZooWatchResult = { watchId: string; label: string; status: ZooWatchStatus; added: number; note?: string }
+
+export type SetupSessionMeta = { sessionId: string; title: string; createdAt: number; lastActivityAt: number }
+export type ZooCredentialMeta = { name: string; createdAt: number }

@@ -444,6 +444,11 @@ rpc = createRPC({
       createDirectory((params ?? {}) as { parentDir?: unknown; name?: unknown }),
 
     zooStatus: async (params: unknown) => zoo.status(params),
+    zooListSetupSessions: async (params: unknown) => zoo.listSetupSessions(params),
+    zooRecordSetupSession: async (params: unknown) => zoo.recordSetupSession(params),
+    zooListCredentials: async (params: unknown) => zoo.listCredentials(params),
+    zooSetCredential: async (params: unknown) => zoo.setCredential(params),
+    zooDeleteCredential: async (params: unknown) => zoo.deleteCredential(params),
     zooListAreas: async (params: unknown) => zoo.listAreas(params),
     zooCreateArea: async (params: unknown) => zoo.createArea(params),
     zooUpdateArea: async (params: unknown) => zoo.updateArea(params),

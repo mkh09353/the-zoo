@@ -81,7 +81,7 @@ const items: ZooItem[] = [
 const entries = buildInbox({ ideas, items, insights })
 
 describe("ZooWorkspace", () => {
-  it("renders the three zones and the Talk to the Factory affordance", () => {
+  it("renders the workspace navigation and the Talk to the Factory affordance", () => {
     const html = renderToStaticMarkup(
       <TooltipProvider>
         <ZooWorkspace baseUrl={null} repoId={null} onOpenChat={() => {}} />
@@ -91,6 +91,7 @@ describe("ZooWorkspace", () => {
     expect(html).toContain("Inbox")
     expect(html).toContain("Board")
     expect(html).toContain("Sources")
+    expect(html).toContain("Setup")
     expect(html).toContain("Talk to the Factory")
   })
 

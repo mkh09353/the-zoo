@@ -30,6 +30,7 @@ import { SidekickPicker } from "./components/SidekickPicker"
 import { BrowserPane } from "./components/BrowserPane"
 import { FactoryPane } from "./components/FactoryPane"
 import { ZooWorkspace } from "./components/zoo/ZooWorkspace"
+import { SetupView } from "./components/zoo/SetupView"
 import { ExternalLinkMenu } from "./components/ExternalLinkMenu"
 import { ConfirmHost } from "./components/ConfirmDialog"
 import { confirm } from "./lib/confirm"
@@ -399,7 +400,7 @@ export function App() {
   const [factoryOpen, setFactoryOpen] = useState(false)
   // The Zoo is the app's primary surface; chat is the secondary one, reachable
   // from the workspace header, the palette, or by opening an item's session.
-  const [surface, setSurface] = useState<"zoo" | "chat">("zoo")
+  const [surface, setSurface] = useState<"zoo" | "chat" | "setup">("zoo")
   // PR reviews: the board is polled here (the sidebar widget needs it whether or
   // not the panel is open); the slide-over owns actions and setup.
   const [prOpen, setPrOpen] = useState(false)
@@ -2572,6 +2573,7 @@ export function App() {
     { id: "browser", label: browserOpen ? "Close browser" : "Open browser", group: "Workspace" },
     { id: "factory", label: factoryOpen ? "Close Factory" : "Open Factory", group: "Workspace" },
     { id: "zoo", label: surface === "zoo" ? "Open chat" : "Open The Zoo", group: "Workspace" },
+    { id: "setup", label: "Open Setup", group: "Workspace" },
     { id: "settings", label: "Open Settings", hint: "⌘,", group: "Integration" },
     { id: "onboarding", label: "Run Onboarding", group: "Integration" },
   ], [repos, sessions, uiModels, browserOpen, factoryOpen, surface])
@@ -2615,6 +2617,7 @@ export function App() {
       else if (a.id === "browser") setBrowserOpen((open) => { if (!open) setFactoryOpen(false); return !open })
       else if (a.id === "factory") setFactoryOpen((open) => { if (!open) setBrowserOpen(false); return !open })
       else if (a.id === "zoo") setSurface((current) => (current === "zoo" ? "chat" : "zoo"))
+      else if (a.id === "setup") setSurface("setup")
       else if (a.id === "settings") setSettingsOpen(true)
       else if (a.id === "onboarding") { if (live) setOnboardingOpen(true) }
       else if (a.id.startsWith("repo:")) dispatchAppAction({ type: "select-repo", repoId: a.id.slice(5) })
@@ -2937,12 +2940,23 @@ export function App() {
           </section>
         </div>
           </>
+        ) : surface === "setup" ? (
+          <SetupView
+            baseUrl={live && connectionState === "connected" ? config?.baseUrl ?? null : null}
+            repoId={activeRepoId}
+            onBack={() => setSurface("zoo")}
+            onOpenSession={(id) => {
+              setSurface("chat")
+              handleSelectThread(id)
+            }}
+          />
         ) : (
           <>
             <ZooWorkspace
               baseUrl={live && connectionState === "connected" ? config?.baseUrl ?? null : null}
               repoId={activeRepoId}
               onOpenChat={() => setSurface("chat")}
+              onOpenSetup={() => setSurface("setup")}
               onOpenSession={
                 live
                   ? (id) => {
