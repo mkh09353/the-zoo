@@ -6,7 +6,9 @@ const isRelease = process.argv[2] === "build"
 const isStableRelease = process.argv.includes("--env=stable")
 // Signing credentials exist only in the tag-release workflow. Keeping this
 // false locally makes `bun run build` a useful unsigned release-build check.
-const signAndNotarize = isStableRelease && process.env.GITHUB_ACTIONS === "true"
+const signAndNotarize = isStableRelease
+  && process.env.GITHUB_ACTIONS === "true"
+  && process.env.ZOO_SIGN_RELEASE === "1"
 // Keep desktop bundle metadata in lockstep with the package/release tag.
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
   version: string
@@ -43,12 +45,12 @@ const FFF_BIN_PACKAGES = [
  * a ~16MB self-extracting app today - and every release would then have to sign
  * and notarize that framework plus its helper processes.
  *
- * Build a CEF variant with `CHUNKY_BUNDLE_CEF=1 bun run build` (or `... bun run
+ * Build a CEF variant with `ZOO_BUNDLE_CEF=1 bun run build` (or `... bun run
  * dev`). Nothing else has to change: the main window stays on the system WebView
  * (`renderer: "native"` in src/bun/index.ts) and only the browser pane asks for
  * `renderer="cef"`, which it does automatically once build.json advertises it.
  */
-const bundleCEF = process.env.CHUNKY_BUNDLE_CEF === "1"
+const bundleCEF = process.env.ZOO_BUNDLE_CEF === "1"
 
 const fffBinCopy: Record<string, string> = {}
 for (const name of FFF_BIN_PACKAGES) {
@@ -60,8 +62,8 @@ for (const name of FFF_BIN_PACKAGES) {
 
 export default {
   app: {
-    name: isRelease ? "Chunky" : "Chunky Dev",
-    identifier: isRelease ? "to.chunky.app" : "to.chunky.app.dev",
+    name: isRelease ? "The Zoo" : "The Zoo Dev",
+    identifier: isRelease ? "to.chunky.zoo" : "to.chunky.zoo.dev",
     version,
   },
   build: {
@@ -108,6 +110,6 @@ export default {
   // This hook runs after staging and before Electrobun signs/notarizes the app.
   scripts: signAndNotarize ? { postBuild: "scripts/sign-nested-macho.ts" } : undefined,
   release: {
-    baseUrl: "https://github.com/mkh09353/chunky-app/releases/latest/download",
+    baseUrl: "https://github.com/mkh09353/the-zoo/releases/latest/download",
   },
 } satisfies ElectrobunConfig

@@ -1,4 +1,4 @@
-// Durable desktop UI state: ~/.chunky/state/desktop.json.
+// Durable Zoo desktop UI state: ~/.zoo/state/desktop.json.
 //
 // The renderer's own storage (WKWebView localStorage) lives inside the app
 // container, so it does not survive a reinstall and is not guaranteed across
@@ -14,9 +14,9 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-/** Desktop-owned persistent state. Do not use the replaceable runtime directory. */
+/** Zoo-owned persistent state. Do not use the replaceable Chunky runtime directory. */
 export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CHUNKY_HOME || join(homedir(), ".chunky", "state")
+  return env.CHUNKY_HOME || join(homedir(), ".zoo", "state")
 }
 
 export function desktopStatePath(env: NodeJS.ProcessEnv = process.env): string {

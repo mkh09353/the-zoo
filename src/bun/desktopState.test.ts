@@ -22,7 +22,7 @@ describe("desktop state location", () => {
     try {
       expect(stateDir(env)).toBe(dir)
       expect(desktopStatePath(env)).toBe(join(dir, "desktop.json"))
-      expect(stateDir({} as NodeJS.ProcessEnv)).toMatch(/\.chunky\/state$/)
+      expect(stateDir({} as NodeJS.ProcessEnv)).toMatch(/\.zoo\/state$/)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

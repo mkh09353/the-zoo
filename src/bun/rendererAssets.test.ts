@@ -13,12 +13,17 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { createHash } from "node:crypto"
 import config from "../../electrobun.config.ts"
+import { stateDir } from "./desktopState"
+import { runtimeRoot } from "./runtimeInstaller"
 
 const ROOT = join(import.meta.dir, "..", "..")
 const PUBLIC_DIR = join(ROOT, "src", "mainview", "public")
 const DIST = join(ROOT, "dist")
 const VIEW_ROOT = "views/mainview"
+const APP_NAME = config.app?.name ?? ""
+const APP_IDENTIFIER = config.app?.identifier ?? ""
 
 /** Vite rewrites this dev-only entry into a hashed /assets/* bundle. */
 const DEV_ONLY_REFS = new Set(["/main.tsx"])
@@ -65,6 +70,18 @@ function packagedPath(distRelative: string): string | null {
 }
 
 describe("renderer assets are packaged", () => {
+  test("release identity is distinct from the Chunky desktop app", () => {
+    expect(APP_NAME.startsWith("The Zoo")).toBe(true)
+    expect(APP_IDENTIFIER.startsWith("to.chunky.zoo")).toBe(true)
+    expect(APP_IDENTIFIER.startsWith("to.chunky.app")).toBe(false)
+    expect(config.release?.baseUrl).toBe("https://github.com/mkh09353/the-zoo/releases/latest/download")
+  })
+
+  test("Zoo mutable state is isolated while the immutable Chunky runtime is shared", () => {
+    expect(stateDir({} as NodeJS.ProcessEnv)).toMatch(/\.zoo\/state$/)
+    expect(runtimeRoot({} as NodeJS.ProcessEnv)).toMatch(/\.chunky\/app$/)
+  })
+
   test("every root-absolute asset reference exists in public/", () => {
     const refs = referencedAssets()
     expect(refs.length).toBeGreaterThan(0)
@@ -124,5 +141,16 @@ describe("renderer assets are packaged", () => {
       join(ROOT, "assets", "brand", "chunky-minimal-purple-exact.svg"),
     )
     expect(Buffer.compare(mark, approved)).toBe(0)
+  })
+
+  test("the native app icon is Zoo artwork, not the Chunky app icon", () => {
+    const zooIcon = readFileSync(
+      join(ROOT, "assets", "icon.iconset", "icon_512x512@2x.png"),
+    )
+    const chunkyIcon = readFileSync(
+      join(ROOT, "assets", "brand", "chunky-minimal-purple.png"),
+    )
+    const hash = (value: Buffer) => createHash("sha256").update(value).digest("hex")
+    expect(hash(zooIcon)).not.toBe(hash(chunkyIcon))
   })
 })

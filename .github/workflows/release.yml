@@ -43,11 +43,25 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Import Developer ID signing certificate
+      - name: Select signed or unsigned release
         shell: bash
         env:
-          KEYCHAIN_PATH: ${{ runner.temp }}/chunky-signing.keychain-db
-          CERTIFICATE_PATH: ${{ runner.temp }}/chunky-developer-id.p12
+          REQUESTED: ${{ vars.ZOO_SIGN_RELEASE }}
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ "$REQUESTED" = "1" ] && [ -n "$CERTIFICATE" ]; then
+            echo "ZOO_SIGN_RELEASE=1" >> "$GITHUB_ENV"
+          else
+            echo "ZOO_SIGN_RELEASE=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Import Developer ID signing certificate
+        if: ${{ env.ZOO_SIGN_RELEASE == '1' }}
+        shell: bash
+        env:
+          KEYCHAIN_PATH: ${{ runner.temp }}/zoo-signing.keychain-db
+          CERTIFICATE_PATH: ${{ runner.temp }}/zoo-developer-id.p12
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
@@ -65,19 +79,31 @@ jobs:
 
       - run: bun run build
 
+      - name: Explain unsigned release
+        if: ${{ env.ZOO_SIGN_RELEASE != '1' }}
+        run: echo "Publishing an unsigned The Zoo build; the installer removes quarantine for unsigned artifacts."
+
       - name: Create or update GitHub Release and upload artifacts
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           fail_on_unmatched_files: true
           generate_release_notes: true
+          body: |
+            ## Install on Apple Silicon Macs
+
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/mkh09353/the-zoo/main/scripts/install.sh | bash
+            ```
+
+            The Zoo installs as a separate app from Chunky and uses its own local server state, so both apps can run at the same time without sharing thread lists.
 
       - name: Remove temporary signing keychain
-        if: ${{ always() }}
+        if: ${{ always() && env.ZOO_SIGN_RELEASE == '1' }}
         shell: bash
         env:
-          KEYCHAIN_PATH: ${{ runner.temp }}/chunky-signing.keychain-db
-          CERTIFICATE_PATH: ${{ runner.temp }}/chunky-developer-id.p12
+          KEYCHAIN_PATH: ${{ runner.temp }}/zoo-signing.keychain-db
+          CERTIFICATE_PATH: ${{ runner.temp }}/zoo-developer-id.p12
         run: |
           security delete-keychain "$KEYCHAIN_PATH" || true
           rm -f "$CERTIFICATE_PATH"

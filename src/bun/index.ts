@@ -96,7 +96,7 @@ async function checkForUpdates({ interactive = false } = {}): Promise<void> {
         await Utils.showMessageBox({
           type: "info",
           title: "Check for Updates",
-          message: "Chunky is up to date.",
+          message: "The Zoo is up to date.",
         })
       }
       if (update.error) console.warn("[chunky] update check failed:", update.error)
@@ -113,7 +113,7 @@ async function checkForUpdates({ interactive = false } = {}): Promise<void> {
     const { response } = await Utils.showMessageBox({
       type: "question",
       title: "Update Ready",
-      message: "A Chunky update has been downloaded.",
+      message: "An update for The Zoo has been downloaded.",
       detail: "Restart now to install it?",
       buttons: ["Restart and Install", "Later"],
       defaultId: 0,

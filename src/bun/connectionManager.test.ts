@@ -11,6 +11,7 @@ import {
   type ConnectionDependencies,
 } from "./connectionManager"
 import { ensureChunkyServerLauncher } from "./launcherSymlink"
+import { resolveBun, runtimeRoot } from "./runtimeInstaller"
 
 const cleanup: string[] = []
 afterEach(async () => {
@@ -323,6 +324,30 @@ test("starts an isolated runtime and waits until its authenticated server is rea
   expect(result.serverToken).toBeTruthy()
   expect(starts.count).toBe(1)
   expect(command[0]).toBe(join(runtime, "bin", "chunky-server"))
+  expect(started.CHUNKY_DB).toBe(join(state, "chunky.db"))
+  expect(started.CHUNKY_GRAPH_DB).toBe(join(state, "chunky-graph.db"))
+  expect(started.CHUNKY_SETTINGS).toBe(join(state, "settings.json"))
+  expect(started.CHUNKY_AUTH).toBe(join(state, "auth.json"))
+  expect(started.CHUNKY_DISCOVERY_RECORD).toMatch(new RegExp(`^${state.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/servers/`))
+  expect(runtimeRoot({} as NodeJS.ProcessEnv)).toMatch(/\.chunky\/app$/)
+  expect(resolveBun({} as NodeJS.ProcessEnv, "/tmp/nonexistent-zoo-home")).not.toContain(".zoo")
+})
+
+test("does not discover a server record from a separate Chunky root", async () => {
+  const zooState = tempState()
+  const chunkyState = tempState()
+  const runtime = fakeRuntime(zooState, "2")
+  const foreign = { ...record(48401, "/wanted", Date.now()), version: runtime.version, buildId: runtime.buildId }
+  writeFileSync(join(chunkyState, "servers", "chunky.json"), JSON.stringify(foreign))
+  writeFileSync(join(zooState, "settings.json"), JSON.stringify({ serverToken: "zoo-token" }))
+  const starts = { count: 0 }
+  const testDeps = startableDeps(new Set([foreign.port]), starts, new Map([[foreign.port, foreign]]))
+  const result = await resolveChunkyConnection({
+    CHUNKY_HOME: zooState, CHUNKY_WORKSPACE: "/wanted", CHUNKY_RUNTIME_DIR: runtime.root,
+  }, testDeps)
+  expect(starts.count).toBe(1)
+  expect(result.baseUrl).toBe("http://localhost:43210")
+  expect(existsSync(join(chunkyState, "servers", "chunky.json"))).toBe(true)
 })
 
 test("an upgraded runtime moves the app onto a server built from it", async () => {

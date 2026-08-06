@@ -1,4 +1,7 @@
-Chunky asset package
+The Zoo asset package
+
+the-zoo.png is the native desktop/product artwork used to derive AppIcon.icns.
+The Chunky artwork below remains the in-chat executor identity.
 
 *-exact.svg files are visually pixel-perfect matches to the approved generated artwork. They are SVG containers with the approved transparent PNG embedded inside.
 

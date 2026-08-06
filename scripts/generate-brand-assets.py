@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Derive the macOS iconset from the approved Chunky artwork.
+Derive the macOS iconset from The Zoo artwork.
 
 This script contains NO artwork. Its only input is the approved, immutable
-raster committed at assets/brand/chunky-minimal-purple.png, and its only
+raster committed at assets/brand/the-zoo.png, and its only
 operations are mechanical:
 
   1. uniform scale (aspect ratio preserved, no crop, no stretch)
@@ -44,10 +44,10 @@ except ImportError:  # pragma: no cover - environment guard
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# The approved artwork. This file is a byte-identical copy of the Chunky asset
-# package's chunky-minimal-purple.png and must never be edited in place.
-SOURCE = ROOT / "assets" / "brand" / "chunky-minimal-purple.png"
-# The in-app mark is the approved artwork's SVG container, used verbatim.
+# The approved Zoo artwork.
+SOURCE = ROOT / "assets" / "brand" / "the-zoo.png"
+# The in-app chat mark remains the approved Chunky executor artwork; only the
+# native app icon is changed to The Zoo brand so both products are distinct.
 MARK_SOURCE = ROOT / "assets" / "brand" / "chunky-minimal-purple-exact.svg"
 MARK_DEST = ROOT / "src" / "mainview" / "public" / "chunky-mark.svg"
 ICONSET = ROOT / "assets" / "icon.iconset"
@@ -169,7 +169,7 @@ def main() -> int:
 
     if args.contact_sheet is not None:
         target = Path(args.contact_sheet) if args.contact_sheet else \
-            Path(tempfile.gettempdir()) / "chunky-icon-contact-sheet.png"
+            Path(tempfile.gettempdir()) / "the-zoo-icon-contact-sheet.png"
         contact_sheet(art, target)
 
     if args.check:

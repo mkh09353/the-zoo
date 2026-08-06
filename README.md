@@ -2,19 +2,15 @@
 
 ![The Zoo](assets/brand/the-zoo.png)
 
-A standalone coding-agent chat desktop app.
+A standalone product-factory desktop app.
 Electrobun shell (bun-based), React 19 + Vite + Tailwind v4 webview, UI kit on
-**@base-ui/react**. Phase 0 talks to the local Chunky server over authenticated
-HTTP + SSE (`@chunky/protocol`).
+**@base-ui/react**. The Zoo runs its own isolated Chunky server over authenticated
+HTTP + SSE (`@chunky/protocol`), so Zoo threads do not appear in the Chunky app.
 
 ## Run
 
 ```sh
-# Terminal A — Chunky server (port 4620)
-cd ~/Downloads/chunky && bun run server
-
-# Terminal B — this app
-cd ~/Downloads/chunky-app
+cd ~/Downloads/the-zoo
 bun install
 bun run dev        # vite (HMR) + electrobun window
 ```
@@ -33,19 +29,20 @@ very first invocation may exit after downloading; just run it again.
 macOS on Apple Silicon (arm64) is currently the supported release target:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mkh09353/chunky-app/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mkh09353/the-zoo/main/scripts/install.sh | bash
 ```
 
-The installer downloads the latest release DMG and installs `Chunky.app` in
+The installer downloads the latest release DMG and installs `The Zoo.app` in
 `/Applications`. It preserves quarantine metadata for signed releases and only
-removes it as a fallback for legacy unsigned releases. To install manually, download
-[`stable-macos-arm64-Chunky.dmg`](https://github.com/mkh09353/chunky-app/releases/latest/download/stable-macos-arm64-Chunky.dmg),
-open it, and copy `Chunky.app` to `/Applications`.
+removes it for unsigned releases. If `/Applications` is not writable by your
+account, use the manual install instead. To install manually, download
+[`stable-macos-arm64-TheZoo.dmg`](https://github.com/mkh09353/the-zoo/releases/latest/download/stable-macos-arm64-TheZoo.dmg),
+open it, and copy `The Zoo.app` to `/Applications`.
 
 ## Releases
 
-Chunky checks GitHub Releases for updates shortly after launch and from
-**Chunky → Check for Updates…**. Available updates download in the background
+The Zoo checks GitHub Releases for updates shortly after launch and from
+**The Zoo → Check for Updates…**. Available updates download in the background
 and are installed after confirmation.
 
 To cut a release, update the `version` in `package.json`, then create and push
@@ -59,13 +56,24 @@ git push origin vX.Y.Z
 The release workflow verifies the tag matches `package.json`, runs the stable
 macOS arm64 build, and publishes every Electrobun artifact from `artifacts/` to
 the GitHub Release. The updater polls
-`https://github.com/mkh09353/chunky-app/releases/latest/download/stable-macos-arm64-update.json`.
+`https://github.com/mkh09353/the-zoo/releases/latest/download/stable-macos-arm64-update.json`.
+
+The first standalone Zoo release is `v0.4.0`; the version jump distinguishes it
+from the earlier builds that still used the Chunky app identity and state root.
+
+The Zoo installs alongside Chunky with a separate bundle identifier and uses
+`~/.zoo/state` for its desktop state, server discovery, auth, settings, and
+Chunky session databases. It may reuse the immutable Chunky runtime under
+`~/.chunky/app`, but it launches a separate dynamically-ported server process.
+Running both apps at once therefore keeps their thread lists isolated.
 
 ### macOS signing and notarization setup
 
-Tag releases sign and notarize with `xcrun notarytool`; local `bun run build`
-remains unsigned and does not require Apple credentials. Before creating the
-first release, create a **Developer ID Application** certificate in the Apple
+Tag releases sign and notarize with `xcrun notarytool` when this repository has
+the Apple secrets below. Until then, the workflow publishes an unsigned DMG and
+the installer removes quarantine after verifying that no valid signature is
+present. Local `bun run build` is also unsigned. To enable signed releases,
+create a **Developer ID Application** certificate in the Apple
 Developer portal for the team, export it from Keychain Access as a passworded
 `.p12`, and base64 encode it without line wrapping:
 
@@ -86,6 +94,10 @@ repository secrets with these exact names and values:
 | `ELECTROBUN_APPLEID` | Apple ID email address authorized for notarization. |
 | `ELECTROBUN_APPLEIDPASS` | App-specific password created for that Apple ID. |
 | `ELECTROBUN_TEAMID` | Ten-character Apple Developer Team ID. |
+
+After adding the secrets, set the repository variable `ZOO_SIGN_RELEASE=1` to
+enable the signing/import/notarization steps. Leaving it unset publishes an
+unsigned release.
 
 The workflow imports the certificate into a temporary keychain, grants
 `codesign` access, then deletes the keychain in an `always()` cleanup step.
@@ -113,16 +125,12 @@ server state is the default whenever connected.
 
 - **Live client** (`src/mainview/lib/api.ts`, `transcript.ts`, `reconnect.ts`) —
   sessions list/create, SSE transcript reduce, send/interrupt, model picker.
-- **Theme** — Chunky brand purple, dark default, pre-paint bootstrap in `index.html`.
-- **Brand** (`assets/brand/`) — the approved Chunky "Minimal Purple" artwork,
-  committed byte-for-byte from the Chunky asset package (see
-  `assets/brand/README.txt`). It is the source of truth and is never edited in
-  place. `src/mainview/public/chunky-mark.svg` is a verbatim copy of
-  `chunky-minimal-purple-exact.svg`. `bun run icons` mechanically derives the
-  10-file `assets/icon.iconset/` that Electrobun turns into `AppIcon.icns` —
-  uniform scale, centred on a transparent square canvas, nothing else — and
-  `bun run icons:check` fails if anything committed has drifted from the
-  approved artwork.
+- **Theme** — Zoo brand purple, dark default, pre-paint bootstrap in `index.html`.
+- **Brand** (`assets/brand/`) — `the-zoo.png` is the native app/icon artwork;
+  the Chunky "Minimal Purple" mark remains the executor identity inside chat.
+  `bun run icons` mechanically derives the 10-file `assets/icon.iconset/` from
+  the Zoo artwork, and `bun run icons:check` fails if the native icons or the
+  verbatim in-chat Chunky mark drift from their approved sources.
 - **UI kit** (`src/mainview/components/ui/`) — button, input, textarea, dialog,
   dropdown-menu, tooltip, scroll-area, kbd, skeleton, switch, separator.
 - **Screens** — sidebar (real sessions when live), chat view with code blocks +
